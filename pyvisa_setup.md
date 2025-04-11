@@ -20,3 +20,28 @@ The standard library for instrument control in Python is PyVISA. It provides a u
 ```
 pip install pyvisa pyvisa-py pySerial
 ```
+
+En construcción:
+
+conda create -n med
+conda activate med
+conda install pip
+sudo addgroup <username> dialout
+pip install pyvisa pyvisa-py pyUSB pySerial numpy datetime matplotlib
+pip install python-usbtmc
+pip install zeroconf
+pip install jupyter-lab
+pip install psutil
+
+sudo groupadd usbusers
+sudo usermod -a -G usbusers researcher
+cd /etc/udev/rules.d/
+sudo gedit 99-com.rules # Para agregar: SUBSYSTEM=="usb", MODE="0666", GROUP="usbusers"
+sudo udevadm control --reload
+sudo udevadm trigger
+sudo reboot
+
+conda activate med
+cd /home/Maximiliano/TestPyVisa/
+python3 Scan_rapido.py 
+python3 Prueba_TDS1012B.py 
