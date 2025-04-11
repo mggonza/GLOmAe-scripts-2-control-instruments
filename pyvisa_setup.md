@@ -6,17 +6,17 @@ To manage these different interfaces in a unified way in software, there is a sp
 ## 1. Prerequisites: python and pip
 It is highly recommended to work within a virtual environment for each project, to avoid dependency conflicts:
 
-'''
+```
 conda create -n <env_name>
 conda activate <env_name>
 python3 --version
 conda install pip
 pip3 --version
-'''
+```
 
 ## 2. Install the Core Library: PyVISA
 The de facto standard library for instrument control in Python is PyVISA. It provides a unified interface for different backends (VISA implementations). 
 
-'''
+```
 pip install pyvisa pyvisa-py pySerial
-'''
+```
