@@ -23,6 +23,7 @@ pip install pyvisa pyvisa-py pySerial
 
 En construcción:
 
+```
 conda create -n med
 conda activate med
 conda install pip
@@ -45,3 +46,4 @@ conda activate med
 cd /home/Maximiliano/TestPyVisa/
 python3 Scan_rapido.py 
 python3 Prueba_TDS1012B.py 
+```
