@@ -21,6 +21,25 @@ The standard library for instrument control in Python is PyVISA. It provides a u
 pip install pyvisa pyvisa-py pySerial
 ```
 
+## 3. Configuration and Permissions by Interface Type
+This is where things vary depending on how you connect the instrument.
+
+### A. Serial Port Control (RS-232, USB-Serial)
+Many instruments, especially older or simpler ones use serial communication. USB-to-serial adapters are also common and appear in Linux as serial devices.
+
+* Port Identification: connect your device. In Linux, serial ports usually appear as /dev/ttyS0, /dev/ttyS1, etc. (for native serial ports) or /dev/ttyUSB0, /dev/ttyUSB1, /dev/ttyACM0, etc. (for USB-Serial adapters or instruments that emulate a serial port over USB). You can try to identify them:
+
+  * Disconnect the device. Run: ``` ls /dev/tty*```.
+  * Connect the device. Wait a few seconds. Run  ```ls /dev/tty*``` again. The new device /dev/ttyUSBx or /dev/ttyACMx is likely your instrument.
+  * You can also use ```dmesg | tail`` just after connecting the device to see what name the kernel assigned to it.
+    
+* Permissions: by default, access to serial ports in Linux requires special permissions. Typically, these devices belong to the dialout group. You must add your user to this group:
+
+```
+sudo usermod -a -G dialout $USER
+```
+
+
 En construcción:
 
 ```
