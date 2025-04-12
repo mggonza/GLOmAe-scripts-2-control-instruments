@@ -27,10 +27,10 @@ This is where things vary depending on how you connect the instrument.
 ### A. Serial Port Control (RS-232, USB-Serial)
 Many instruments, especially older or simpler ones use serial communication. USB-to-serial adapters are also common and appear in Linux as serial devices.
 
-* Port Identification: connect your device. In Linux, serial ports usually appear as $/dev/ttyS0$, /dev/ttyS1, etc. (for native serial ports) or /dev/ttyUSB0, /dev/ttyUSB1, /dev/ttyACM0, etc. (for USB-Serial adapters or instruments that emulate a serial port over USB). You can try to identify them:
+* Port Identification: connect your device. In Linux, serial ports usually appear as ```/dev/ttyS0```, ```/dev/ttyS1```, etc. (for native serial ports) or ```/dev/ttyUSB0```, ```/dev/ttyUSB1```, ```/dev/ttyACM0```, etc. (for USB-Serial adapters or instruments that emulate a serial port over USB). You can try to identify them:
 
   * Disconnect the device. Run: ``` ls /dev/tty*```.
-  * Connect the device. Wait a few seconds. Run  ```ls /dev/tty*``` again. The new device /dev/ttyUSBx or /dev/ttyACMx is likely your instrument.
+  * Connect the device. Wait a few seconds. Run  ```ls /dev/tty*``` again. The new device ```/dev/ttyUSBx``` or ```/dev/ttyACMx``` is likely your instrument.
   * You can also use ```dmesg | tail``` just after connecting the device to see what name the kernel assigned to it.
     
 * Permissions: by default, access to serial ports in Linux requires special permissions. Typically, these devices belong to the dialout group. You must add your user to this group:
@@ -39,6 +39,44 @@ Many instruments, especially older or simpler ones use serial communication. USB
 sudo usermod -a -G dialout $USER
 ```
 * Important: after running this command, you must log out and log back in (or reboot) for the group change to take effect. You can check if you belong to the group with the groups command.
+
+* Python usage (with PyVISA):
+
+```
+import pyvisa
+
+rm = pyvisa.ResourceManager('@py') # Use the pyvisa-py backend
+# Replace '/dev/ttyUSB0' with your actual port
+# Also adjust baud_rate, data_bits, parity, and stop_bits according to the instrument manual
+try:
+    # The resource format is ASRL[address]::INSTR
+    instrument = rm.open_resource('ASRL/dev/ttyUSB0::INSTR',
+                                  baud_rate=9600,
+                                  data_bits=8,
+                                  parity=pyvisa.constants.Parity.none,
+                                  stop_bits=pyvisa.constants.StopBits.one)
+    instrument.read_termination = '\n' # Or '\r\n', depending on the instrument
+    instrument.write_termination = '\n'
+
+    # Example: Ask for ID
+    instrument.write('*IDN?')
+    id = instrument.read()
+    print(f"ID: {id}")
+
+    # Other commands...
+    # instrument.write('SPECIFIC_COMMAND')
+    # response = instrument.read()
+    # value = instrument.query('OTHER_COMMAND?') # write + read
+
+    instrument.close()
+    print("Communication closed.")
+except pyvisa.errors.VisaIOError as e:
+    print(f"VISA error: {e}")
+except Exception as e:
+    print(f"An error occurred: {e}")
+finally:
+    rm.close()
+```
 
 En construcción:
 
