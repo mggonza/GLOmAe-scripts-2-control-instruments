@@ -129,6 +129,143 @@ sudo udevadm trigger
 ```
 
   * Disconnect and reconnect the instrument for the rule to be applied correctly.
+    
+  * Python usage (with PyVISA): ```PyVISA``` can automatically find ```USBTMC``` devices. The resource format is typically ```USB[bus]::[device]::[interface]::INSTR``` or more commonly using ```VendorID``` and ```ProductID.```
 
+```
+import pyvisa
+rm = pyvisa.ResourceManager('@py') # Use the pyvisa-py backend
+# List all resources found by pyvisa-py
+print("Resources found:")
+print(rm.list_resources())
 
+# Try connecting using VendorID and ProductID (replace with your own)
+# Format: USB::VENDOR_ID::PRODUCT_ID::SERIAL_NUMBER::INSTR (Serial Number is optional)
+try:
+    # Example for the Agilent/Keysight from the lsusb example
+    # IDs must be decimal or hexadecimal with a 0x prefix
+    instrument = rm.open_resource('USB::0x0957::0x179a::INSTR')
+    # Or try connecting with the resource name listed by list_resources()
+    # instrument = rm.open_resource('USB0::0x0957::0x179a::MY12345678::0::INSTR')
 
+    # Configure terminations if needed (often not for USBTMC)
+    # instrument.read_termination = '\n'
+    # instrument.write_termination = '\n'
+
+    # Query for ID
+    id = instrument.query('*IDN?')
+
+    print(f"ID: {id}")
+
+    # Other commands...
+    # value = instrument.query('MEAS:VOLT:DC?')
+    # print(f"DC voltage: {value}")
+
+    instrument.close()
+    print("Communication closed.")
+except pyvisa.errors.VisaIOError as e:
+    print(f"Could not connect or communicate. VISA Error: {e}")
+    print("Check:")
+    print("- Is the device connected and powered on?")
+    print("- Were udev rules applied correctly (if necessary)?")
+    print("- Does your user belong to the correct group (e.g., usbtmc, plugdev, dialout)? (Requires re-login)")
+    print("- Are the VendorIDs/ProductIDs correct?")
+    print("- Are you using the '@py' backend?")
+except Exception as e:
+    print(f"An error occurred: {e}")
+finally:
+    rm.close()
+```
+
+  * Backend Note: If ```pyvisa-py``` (@py) doesn't work for your USB device (especially if it's complex or requires a specific driver), you may need to install the National Instruments NI-VISA backend (which has its own installation process and permissions setup on Linux) and then use ```pyvisa``` without specifying @py (```rm = pyvisa.ResourceManager()```). However, always try ```pyvisa-py``` first.
+
+### C. Control over Ethernet (LAN/LXI)
+Many modern instruments also have an Ethernet port and support control over LAN, often using the LXI (LAN eXtensions for Instrumentation) standard.
+
+* Network Configuration:
+    * Connect the instrument to the same network as your Ubuntu notebook.
+    * Make sure the instrument has a valid IP address on that network. It can be obtained via DHCP, or you can configure a static IP (see the instrument's manual). You'll need to know that IP address.
+    * Make sure your notebook can "see" the instrument on the network. You can try pinging ```INSTRUMENT_IP_ADDRESS``` from the Ubuntu terminal.
+    * Firewall: if you have a firewall enabled in Ubuntu (```ufw``` or another), make sure it allows outgoing communication to the instrument and incoming communication if the instrument needs to initiate a connection (less common). Typically, for protocols like VXI-11 or Sockets, you only need to allow outgoing traffic or established connections. Common ports are 111 (portmapper), and other dynamic ports for VXI-11, or a specific TCP port (e.g., 5025) for Sockets communication.
+
+ * Permissions: generally, no special OS-level permissions are required on Linux to open network connections from a user application, unless you attempt to use privileged ports (less than 1024), which is rare for instruments.
+
+ * Usage in Python (with PyVISA): ```pyvisa-py``` supports TCPIP Socket and VXI-11 communication.
+
+```
+import pyvisa
+
+rm = pyvisa.ResourceManager('@py') # Use the pyvisa-py backend
+# Replace '192.168.1.100' with your instrument's actual IP
+instrument_ip = '192.168.1.100'
+
+# Try connecting using TCPIP Socket (common on many modern instruments)
+# The default port is usually 5025 for SCPI-RAW / HiSLIP. See the manual.
+try:
+    # Socket format: TCPIP[board]::host_address[::port]::SOCKET
+    instrument = rm.open_resource(f'TCPIP::{instrument_ip}::5025::SOCKET',
+                                  read_termination='\n',
+                                  write_termination='\n')
+    print(f"Connected to {instrument_ip} via Socket.")
+    # Sometimes you don't need to specify a port and SOCKET:
+    # instrument = rm.open_resource(f'TCPIP::{instrument_ip}::INSTR')
+
+    # Request identification
+    identification = instrument.query('*IDN?')
+    print(f"Identification: {identification}")
+
+    # Other commands...
+    instrument.close()
+    print("Communication closed.")
+
+except pyvisa.errors.VisaIOError as e_sock:
+    print(f"Error connecting via Socket: {e_sock}")
+    print("Attempting to connect via VXI-11 (older)...")
+    # Attempt to connect using VXI-11 (common on older LXI instruments)
+try:
+    # VXI-11 format: TCPIP[board]::host_address[::lan_device_name]::INSTR
+    # lan_device_name is usually 'inst0' or 'instr0', but can vary.
+    instrument = rm.open_resource(f'TCPIP::{instrument_ip}::inst0::INSTR')
+    print(f"Connected to {instrument_ip} via VXI-11.")
+
+    identification = instrument.query('*IDN?')
+    print(f"Identification: {identification}")
+
+    instrument.close()
+    print("Communication closed.")
+except pyvisa.errors.VisaIOError as e_vxi:
+    print(f"Error connecting via VXI-11: {e_vxi}")
+    print("Could not connect to the instrument via Ethernet.")
+    print("Verify:")
+    print("- Is the IP correct?")
+    print("- Is the instrument on the network and turned on?")
+    print("- Is there network connectivity (ping)?")
+    print("- Is the firewall blocking the connection?")
+    print("- Is the protocol (Socket/VXI-11) and port/name are correct (see manual)?")
+except Exception as e:
+    print(f"An error occurred: {e}")
+except Exception as e:
+    print(f"An error occurred: {e}")
+finally:
+    rm.close()
+```
+
+## 4. General Steps and Tips
+
+### 4.1 Consult the Manual: 
+Your instrument's programming manual is essential. It will tell you what interfaces it supports, what protocols it uses (USBTMC, Serial, VXI-11, Sockets), the communication parameters (baud rate, etc.), and the complete list of SCPI commands it understands.
+
+### 4.2 Start Simple: 
+Always try to obtain the ID (```*IDN?```) first. If that works, basic communication is established.
+
+### 4.3 Handle Errors:
+Use ```try...except``` blocks to catch possible communication errors (```pyvisa.errors.VisaIOError```) or other errors.
+
+### 4.4 Close Resources: 
+Make sure to close the connection to the instrument (```instrument.close()```) and the resource manager (```rm.close()```) when you're done, preferably using ```try...finally``` blocks.
+
+### 4.5 ** Timeouts:** 
+PyVISA allows you to configure timeouts (```instrument.timeout = 5000 # 5 seconds in milliseconds```). Adjust them if you expect slow responses.
+
+### 4.6 Experiment: 
+```rm.list_resources()``` is your friend to see what PyVISA detects.
