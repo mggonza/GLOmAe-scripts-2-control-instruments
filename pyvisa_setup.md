@@ -4,7 +4,7 @@ Most modern instruments use a standard called SCPI (Standard Commands for Progra
 To manage these different interfaces in a unified way in software, there is a specification called VISA (Virtual Instrument Software Architecture). This note explains how to use a Python implementation of VISA.
 
 ## 1. Pre-requisites: python and pip
-It is highly recommended to work within a virtual environment for each project, to avoid dependency conflicts:
+It is highly recommended to work within a virtual environment for each project, to avoid dependency conflicts (assuming previous installation of miniconda):
 
 ```
 conda create -n <env_name>
