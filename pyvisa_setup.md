@@ -78,6 +78,44 @@ finally:
     rm.close()
 ```
 
+### B. USB Control (USBTMC or Vendor-Specific)
+Many modern instruments (oscilloscopes, function generators) use USB directly, often following the USBTMC (USB Test & Measurement Class) protocol.
+
+* Device Identification: Connect the instrument. Use ```lsusb``` to view connected USB devices. Look for something that resembles your instrument (it may show the manufacturer or model name).
+
+```
+lsusb
+```
+
+This will give you the ```VendorID``` and ```ProductID``` (e.g., ```Bus 001 Device 005: ID 0957:179a Agilent Technologies```). These IDs are useful for udev rules.
+
+* Permissions (```udev```): as with serial ports, you need permissions to directly access the USB device. The standard and persistent way to do this in Linux is through ```udev``` rules. You'll need to create a rules file in ```/etc/udev/rules.d/```.
+
+  * Get ```VendorID``` and ```ProductID```: Use ```lsusb```. For example, ```0957``` and ```179a```.
+  * Create the rules file: Create a file, for example, ```/etc/udev/rules.d/99-instruments.rules```. The name must begin with a number (priority) and end with ```.rules```.
+
+```
+sudo gedit /etc/udev/rules.d/99-instruments.rules
+```
+
+  * Add the rule: inside the file, add one line for each device type. Set the ```VendorID```, ```ProductID```, and the ```GROUP```. The ```usbtmc``` group is a good choice, but ```plugdev``` or ```dialout``` are also common. Make sure your user belongs to the group you choose.
+
+Code Snippet
+
+```
+# Rule for an Agilent/Keysight device (example)
+SUBSYSTEM=="usb", ATTR{idVendor}=="0957", ATTR{idProduct}=="179a", MODE="0666", GROUP="usbtmc"
+
+# Rule for another device, using a different group if necessary
+# SUBSYSTEM=="usb", ATTR{idVendor}=="xxxx", ATTR{idProduct}=="yyyy", MODE="0660", GROUP="plugdev"
+```
+
+```SUBSYSTEM=="usb"```: Applies to USB devices.
+```ATTR{idVendor}=="0957"```: Matches the vendor ID (hexadecimal).
+```ATTR{idProduct}=="179a"```: Matches the product ID (hexadecimal).
+```MODE="0666"```: Sets the permissions (read/write for everyone). ```0660``` would give read/write to the owner and group.
+```GROUP="usbtmc"```: Assigns the device to the usbtmc group. If this group doesn't exist, create it (sudo groupadd usbtmc) and add your user to it (```sudo usermod -a -G usbtmc $USER```). Remember to log out and back in after adding yourself to the group.
+
 En construcción:
 
 ```
