@@ -114,7 +114,9 @@ SUBSYSTEM=="usb": Applies to USB devices.
 ATTR{idVendor}=="0957": Matches the vendor ID (hexadecimal).
 ATTR{idProduct}=="179a": Matches the product ID (hexadecimal).
 MODE="0666": Sets the permissions (read/write for everyone). ```0660``` would give read/write to the owner and group.
-ROUP="usbtmc": Assigns the device to the usbtmc group. If this group doesn't exist, create it (sudo groupadd usbtmc) and add your user to it (```sudo usermod -a -G usbtmc $USER```). Remember to log out and back in after adding yourself to the group.
+ROUP="usbtmc": Assigns the device to the usbtmc group. If this group doesn't exist, create it (```sudo groupadd usbtmc```)
+and add your user to it (```sudo usermod -a -G usbtmc $USER```).
+Remember to log out and back in after adding yourself to the group.
 """
 
 ```
