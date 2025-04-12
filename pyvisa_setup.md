@@ -110,35 +110,20 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="0957", ATTR{idProduct}=="179a", MODE="0666", 
 # SUBSYSTEM=="usb", ATTR{idVendor}=="xxxx", ATTR{idProduct}=="yyyy", MODE="0660", GROUP="plugdev"
 ```
 
-```SUBSYSTEM=="usb"```: Applies to USB devices.
-```ATTR{idVendor}=="0957"```: Matches the vendor ID (hexadecimal).
-```ATTR{idProduct}=="179a"```: Matches the product ID (hexadecimal).
-```MODE="0666"```: Sets the permissions (read/write for everyone). ```0660``` would give read/write to the owner and group.
-```GROUP="usbtmc"```: Assigns the device to the usbtmc group. If this group doesn't exist, create it (sudo groupadd usbtmc) and add your user to it (```sudo usermod -a -G usbtmc $USER```). Remember to log out and back in after adding yourself to the group.
+   * ```SUBSYSTEM=="usb"```: Applies to USB devices.
+   * ```ATTR{idVendor}=="0957"```: Matches the vendor ID (hexadecimal).
+   * ```ATTR{idProduct}=="179a"```: Matches the product ID (hexadecimal).
+   * ```MODE="0666"```: Sets the permissions (read/write for everyone). ```0660``` would give read/write to the owner and group.
+   * ```GROUP="usbtmc"```: Assigns the device to the usbtmc group. If this group doesn't exist, create it (sudo groupadd usbtmc) and add your user to it (```sudo usermod -a -G usbtmc $USER```). Remember to log out and back in after adding yourself to the group.
 
-En construcción:
+  * Apply the rules:
 
 ```
-conda create -n med
-conda activate med
-conda install pip
-sudo addgroup <username> dialout
-pip install pyvisa pyvisa-py pyUSB pySerial numpy datetime matplotlib
-pip install python-usbtmc
-pip install zeroconf
-pip install jupyter-lab
-pip install psutil
-
-sudo groupadd usbusers
-sudo usermod -a -G usbusers researcher
-cd /etc/udev/rules.d/
-sudo gedit 99-com.rules # Para agregar: SUBSYSTEM=="usb", MODE="0666", GROUP="usbusers"
-sudo udevadm control --reload
+sudo udevadm control --reload-rules
 sudo udevadm trigger
-sudo reboot
-
-conda activate med
-cd /home/Maximiliano/TestPyVisa/
-python3 Scan_rapido.py 
-python3 Prueba_TDS1012B.py 
 ```
+
+  * Disconnect and reconnect the instrument for the rule to be applied correctly.
+
+
+
