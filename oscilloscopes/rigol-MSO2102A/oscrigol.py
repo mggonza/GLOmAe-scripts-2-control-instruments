@@ -205,3 +205,29 @@ class Oscrigol(object):
         """Devuelve la cantidad total de puntos configurados en la forma de onda."""
         return int(self._osci.query(":WAV:POIN?"))
 
+    def download_full_waveform(self, channel=1, filename=None):
+        self._osci.timeout = 20000
+        self._osci.write(":STOP")
+        self._osci.write(":ACQuire:TYPE NORMal")
+        self._osci.write(":ACQuire:MEMDepth LONG")
+        time.sleep(2)
+    
+        self._osci.write(f":WAVeform:SOURce CHAN{channel}")
+        self._osci.write(":WAVeform:POINts:MODE MAXimum")
+        self._osci.write(":WAVeform:FORM BYTE")
+    
+        npts = int(self._osci.query(":WAVeform:POINts?"))
+        print(f"Modo MAX activado, descargando {npts} puntos...")
+    
+        pre = self._osci.query(":WAVeform:PREamble?").split(',')
+        xinc, xorig, yinc, yorig, yref = float(pre[4]), float(pre[5]), float(pre[7]), float(pre[8]), float(pre[9])
+        raw = np.array(self._osci.query_binary_values(":WAVeform:DATA?", datatype='B', container=np.array))
+        v = (raw - yref) * yinc + yorig
+        t = xorig + np.arange(len(v)) * xinc
+    
+        if filename:
+            np.savetxt(filename, np.column_stack((t, v)), delimiter=',', header='time,voltage')
+            print(f"Guardado en {filename}")
+    
+        self._osci.write(":RUN")
+        return t, v
