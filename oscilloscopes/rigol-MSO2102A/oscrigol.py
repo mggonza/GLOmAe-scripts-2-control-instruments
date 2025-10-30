@@ -2,7 +2,6 @@ import pyvisa
 import numpy as np
 import time
 
-
 class Oscrigol(object):
     """
     Class for handling Rigol MSO2102A oscilloscopes using PyVISA TCP/IP interface.
@@ -231,3 +230,137 @@ class Oscrigol(object):
     
         self._osci.write(":RUN")
         return t, v
+
+    def download_raw_fast(self, channel=1, points=14_000_000, filename=None):
+        """
+        Descarga rápida de forma de onda completa en modo RAW.
+    
+        - Valida la profundidad de memoria según canales activos.
+        - Usa lectura binaria directa (read_raw) para máxima velocidad.
+        - Retorna tiempo, voltaje, profundidad efectiva y número de canales activos.
+    
+        Parámetros
+        ----------
+        channel : int
+            Canal a leer (1 o 2)
+        points : int
+            Cantidad de puntos solicitados (se ajusta automáticamente a un valor válido)
+        filename : str, opcional
+            Si se especifica, guarda los datos en CSV
+    
+        Retorna
+        -------
+        t : np.ndarray
+            Vector de tiempo [s]
+        v : np.ndarray
+            Vector de voltaje [V]
+        mem_depth : int
+            Profundidad de memoria efectiva utilizada
+        active_channels : int
+            Cantidad de canales activos durante la adquisición
+        """
+    
+        # --- Parámetros válidos de memoria según manual ---
+        valid_depths = np.array([14e3, 140e3, 1.4e6, 14e6, 56e6])
+    
+        # --- Detectar canales activos ---
+        active_channels = 0
+        for ch in (1, 2):
+            state = self._osci.query(f":CHAN{ch}:DISP?").strip()
+            if state == '1':
+                active_channels += 1
+        if active_channels == 0:
+            active_channels = 1  # fallback
+    
+        # --- Ajustar valores válidos según canales activos ---
+        if active_channels == 1:
+            allowed = valid_depths
+        else:
+            allowed = valid_depths / 2
+    
+        # --- Buscar profundidad más cercana válida ---
+        mem_depth = allowed[np.argmin(np.abs(allowed - points))]
+        if abs(mem_depth - points) > 0:
+            print(f"⚠️ Profundidad solicitada {points:.1e} ajustada a {mem_depth:.1e} "
+                  f"(canales activos = {active_channels})")
+    
+        # --- Configuración VISA ---
+        self._osci.timeout = 120000
+        self._osci.chunk_size = 2**20
+        self._osci.write(":ACQ:TYPE NORM")
+        self._osci.write(":RUN")
+        self._osci.write(f":ACQ:MDEP {int(mem_depth)}")
+        time.sleep(1)
+    
+        # --- Configuración de lectura ---
+        self._osci.write(":STOP")
+        self._osci.write(f":WAV:SOUR CHAN{channel}")
+        self._osci.write(":WAV:FORM BYTE")
+        self._osci.write(":WAV:MODE RAW")
+        self._osci.write(f":WAV:POIN {int(mem_depth)}")
+        
+        self._osci.write(f":WAV:STAR 1")
+        self._osci.write(f":WAV:STOP {int(mem_depth)}")
+        self._osci.write(":WAV:RES")
+        self._osci.write(":WAV:BEG")
+        time.sleep(1)
+
+        # check 
+        self._osci.write(":ACQ:MDEPth?")
+        time.sleep(1)
+        print(":ACQ:MDEPth? = ",self._osci.read())
+        self._osci.write(":WAV:POIN?")
+        time.sleep(1)
+        print(":WAV:POIN? = ",self._osci.read())
+    
+        # --- Obtener preámbulo para calibración ---
+        pre = self._osci.query(":WAV:PRE?").split(',')
+        xinc, xorig, xref = float(pre[4]), float(pre[5]), float(pre[6])
+        yinc, yorig, yref = float(pre[7]), float(pre[8]), float(pre[9])
+    
+        # --- Lectura binaria directa ---
+        print(f"Descargando {int(mem_depth):,} puntos del canal {channel}...")
+        t0 = time.time()
+        #self._osci.write(":WAV:DATA?")
+        #raw = self._osci.read_raw()
+        #dt = time.time() - t0
+        #print(f"Transferencia completada en {dt:.1f} s")
+    
+        # --- Decodificación de datos ---
+        #header_len = 2 + int(raw[1:2].decode())
+        #data = raw[header_len+1:-1]
+        #v = (np.frombuffer(data, dtype=np.uint8) - yref) * yinc + yorig
+        #t = xorig + np.arange(len(v)) * xinc
+        
+        y_aux=[]
+        dataY=[]
+        ind=0
+        
+        while(len(dataY)<int(mem_depth)):
+            raw = np.array(
+                self._osci.query_binary_values(":WAV:DATA?", datatype='B', container=np.array, chunk_size=self._osci.chunk_size, delay=0.1)
+            )
+            y_aux = (raw - yref) * yinc + yorig
+            dataY = np.append(dataY,y_aux)
+            print("Ind:",ind,"Len:",len(y_aux),y_aux)
+            ind=ind+1
+        
+        dataX = xorig + np.arange(len(dataY)) * xinc
+        
+        dt = time.time() - t0
+        print(f"Transferencia completada en {dt:.1f} s")
+
+        # Data output
+        t = dataX
+        v = dataY
+
+        # --- Guardar CSV opcional ---
+        if filename:
+            np.savetxt(filename, np.column_stack((t, v)),
+                       delimiter=',', header='time,voltage', comments='')
+            print(f"Datos guardados en {filename}")
+    
+        self._osci.write(":RUN")
+
+        return t, v, int(mem_depth), active_channels
+    
