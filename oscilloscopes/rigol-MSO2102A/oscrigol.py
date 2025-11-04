@@ -231,7 +231,7 @@ class Oscrigol(object):
         self._osci.write(":RUN")
         return t, v
 
-    def download_raw_fast(self, channel=1, points=14_000_000, filename=None):
+    def download_raw_data(self, channel=1, points=14_000_000, filename=None):
         """
         Descarga rápida de forma de onda completa en modo RAW.
     
@@ -306,12 +306,12 @@ class Oscrigol(object):
         time.sleep(1)
 
         # check 
-        self._osci.write(":ACQ:MDEPth?")
-        time.sleep(1)
-        print(":ACQ:MDEPth? = ",self._osci.read())
-        self._osci.write(":WAV:POIN?")
-        time.sleep(1)
-        print(":WAV:POIN? = ",self._osci.read())
+        #self._osci.write(":ACQ:MDEPth?")
+        #time.sleep(1)
+        #print(":ACQ:MDEPth? = ",self._osci.read())
+        #self._osci.write(":WAV:POIN?")
+        #time.sleep(1)
+        #print(":WAV:POIN? = ",self._osci.read())
     
         # --- Obtener preámbulo para calibración ---
         pre = self._osci.query(":WAV:PRE?").split(',')
@@ -321,16 +321,6 @@ class Oscrigol(object):
         # --- Lectura binaria directa ---
         print(f"Descargando {int(mem_depth):,} puntos del canal {channel}...")
         t0 = time.time()
-        #self._osci.write(":WAV:DATA?")
-        #raw = self._osci.read_raw()
-        #dt = time.time() - t0
-        #print(f"Transferencia completada en {dt:.1f} s")
-    
-        # --- Decodificación de datos ---
-        #header_len = 2 + int(raw[1:2].decode())
-        #data = raw[header_len+1:-1]
-        #v = (np.frombuffer(data, dtype=np.uint8) - yref) * yinc + yorig
-        #t = xorig + np.arange(len(v)) * xinc
         
         y_aux=[]
         dataY=[]
