@@ -241,5 +241,7 @@ class oscrigol(object):
         Ttotal = mdepth / Srate
         if Tscreen < Ttotal:
             print('Warning: the time window is larger than what is shown on the screen!')
-        values = np.linspace(-Ttotal/2,Ttotal/2,mdepth) - hoffset
+            values = np.linspace(-Ttotal/2,Ttotal/2,mdepth) - hoffset
+        else:
+            values = np.linspace(-Tscreen/2,Tscreen/2,mdepth) - hoffset
         return values
