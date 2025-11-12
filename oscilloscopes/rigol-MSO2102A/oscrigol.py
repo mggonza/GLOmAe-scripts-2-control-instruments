@@ -87,9 +87,6 @@ class oscrigol(object):
         values = self.getHorvalues(mdepth)
         values = np.vstack((values, MV)) 
         
-        # Leave the osciloscope in run mode
-        self.run()
-        
         # Close communication
         self.closeComm()
         
@@ -216,6 +213,7 @@ class oscrigol(object):
                     MV = self.getVertvalues(channels[i], mdepth)
                 else:
                     MV = np.vstack((MV, self.getVertvalues(self._channels[i], mdepth))) 
+        self.run()
         return MV
     
     ############################    
