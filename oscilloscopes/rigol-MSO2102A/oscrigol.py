@@ -70,10 +70,11 @@ class oscrigol(object):
         self.run()
         self.setSampAcquisition()
         mdepth = self._mdepth
-        if len(self._channels) > 1:
-            mdepth = mdepth // 2
-        self._osci.write(f":ACQ:MDEP {int(mdepth)}")
-        time.sleep(1)
+        check = self.setandcheckmdepth(mdepth)
+        if check:
+            self.closeComm()
+            values = 0
+            return values
         
         # Get Vertical values
         for i in tqdm(range(int(self._acquisition))):
@@ -147,6 +148,17 @@ class oscrigol(object):
         self._osci.write(":ACQ:TYPE NORM")
         time.sleep(1)
         return
+
+    def setandcheckmdepth(self,mdepth):
+        self._osci.write(f":ACQ:MDEP {int(mdepth)}")
+        time.sleep(1)
+        mdepthread = self._osci.query(f":ACQ:MDEP?")
+        time.sleep(1)
+        if int(mdepthread) != int(mdepth):
+            print("The requested memory depth is incorrect.")
+            return 1
+        else:
+            return 0            
    
     ############################    
     # Trigger configuration
