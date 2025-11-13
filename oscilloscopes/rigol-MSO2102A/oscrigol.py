@@ -216,6 +216,7 @@ class oscrigol(object):
         return values
     
     def getchannels(self, channels, mdepth):
+        time.sleep(1) # wait until the acquisition is completed
         self.stop()
         for i in range(len(channels)):
             if i<1:
