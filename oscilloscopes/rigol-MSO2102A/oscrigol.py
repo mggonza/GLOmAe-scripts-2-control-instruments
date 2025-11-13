@@ -116,8 +116,7 @@ class oscrigol(object):
     ############################
     def config(self, channels=(1,), chanBand=('OFF',), chanCoup=('AC',), 
                chanInv=('OFF',), chanImp = ('OMEG',),
-               trigSource='CHAN1', trigCoup='AC', triggerLevel=0.0,
-               triggerSlope='POS', trigLevel=0.0, trigSlope = 'POS',
+               trigSource='CHAN1', trigCoup='AC', trigLevel=0.0, trigSlope = 'POS',
                acquisition=1,mdepth=14000):
         
         self._channels = channels
@@ -125,8 +124,8 @@ class oscrigol(object):
         self._chanCoup = chanCoup
         self._chanInv = chanInv
         self._chanImp = chanImp
-        self._triggerSource = trigSource
-        self._triggerCoup = trigCoup
+        self._trigSource = trigSource
+        self._trigCoup = trigCoup
         self._trigLevel = trigLevel
         self._trigSlope = trigSlope
         self._acquisition = acquisition
