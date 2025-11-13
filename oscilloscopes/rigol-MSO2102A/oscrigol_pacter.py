@@ -46,7 +46,7 @@ def pacter_med(Nmed = 1, acq=16, mdepth=70000):
         t, v1, v2m = MSO2102A()
     
         # Relevar tiempo pasado, temperatura agua, temperatura aire y humedad
-        Tw, Ta, H = medtemphum()
+        Tw, Ta, Hu = medtemphum()
         
         TT = time.perf_counter() - start  # [s]
         
@@ -55,7 +55,7 @@ def pacter_med(Nmed = 1, acq=16, mdepth=70000):
         T[i,0] = TT 
         T[i,1] = Tw   
         T[i,2] = Ta   
-        T[i,3] = H   
+        T[i,3] = Hu   
         
         np.savez(path + filename + '.npz', t=t, MV = MV, E=E, T=T)
 
