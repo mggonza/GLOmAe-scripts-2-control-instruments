@@ -1,22 +1,36 @@
 import pyvisa
 import numpy as np
+import matplotlib.pyplot as plt
 import time
 from tqdm import tqdm 
 from datetime import datetime
+import serial
 
 ###############################################################################
-def pacter_med(Nmed = 1, acq=16, mdepth=70000):
+def pacter_med(Nmed = 1, acq=16, mdepth=70000, saveresults=True):
     """
-    TODO: agregar help de la función y la medicion de las temperaturas y humedad
+    Scripts to obtain PACTER measurements
+    
+    	Inputs parameters:
+    		Nmed: number of measurements (int)
+    		acq: number of acquisitions to perform average (int)
+    		mdepth: number of samples to be acquired 7000|70000|700000|7000000|28000000
+    	
+    	Output:
+    		t: time axis (Nt,) [s]
+    		MV: voltage signals (Nmed,Nt) [V]
+    		E: laser energy measurements (Nmed,) [J]
+    		T: time [s], water temperature [°C], air temperature [°C] and air relative humidity [%] (Nmed,4)  
+    
     """
-    
-    # TODO: crear objeto medición temperaturas y humedad
-    medtemphum = OBJETOMEDICIONTEMPYHUMEDAD() # ---> poner una nombre mas corto
-    
+      
     # Crear objeto osciloscopio Rigol
     MSO2102A = oscrigol_pacter()
-    MSO2102A.config(acquisition=acq, mdpeth=mdepth)
-    
+    MSO2102A.config(acquisition=acq, mdepth=mdepth)
+
+    # Setup arduino
+    arduino = createArduino()
+
     # Constante de conversión medidor energía láser:
     cte = 1/(0.08*0.08*2)*(1-0.08*2)/1.086e4 # J/V
     cte2 = cte*(1-0.08*2)  # J/V
@@ -40,13 +54,13 @@ def pacter_med(Nmed = 1, acq=16, mdepth=70000):
     for i in range(Nmed):
         
         print(f"Medición: {i+1}")
-
-        input("Presiona Enter para continuar...")
         
         t, v1, v2m = MSO2102A()
     
         # Relevar tiempo pasado, temperatura agua, temperatura aire y humedad
-        Tw, Ta, Hu = medtemphum()
+        #Tw, Ta, RH = 0.0, 0.0, 0.0 
+        Tw, Ta, RH = medtemphum(arduino)
+        print("Tw =",Tw,"Ta =",Ta,"RH =",RH)
         
         TT = time.perf_counter() - start  # [s]
         
@@ -55,13 +69,66 @@ def pacter_med(Nmed = 1, acq=16, mdepth=70000):
         T[i,0] = TT 
         T[i,1] = Tw   
         T[i,2] = Ta   
-        T[i,3] = Hu   
-        
-        np.savez(path + filename + '.npz', t=t, MV = MV, E=E, T=T)
+        T[i,3] = RH   
+
+        if saveresults:
+            np.savez(path + filename + '.npz', t=t, MV = MV, E=E, T=T)
+
+        if i < (Nmed-1):
+            seguir = input("Presione ENTER para continuar...")
 
     print("¡Bien hecho, bucle finalizado!")
        
     return t, MV, E, T
+
+###############################################################################
+def plotresults(t, MV, E, T):
+
+    plt.figure()
+    for i in range(MV.shape[0]):
+        plt.plot(t*1e6,MV[i,:]*1e3)
+        plt.xlabel('time [us]'); plt.ylabel('Amplitude [mV]')
+
+    plt.figure()
+    plt.plot(T[:,0]/60,E*1e3)
+    plt.xlabel('time [min]'); plt.ylabel('Energy laser [mJ]')
+
+    plt.figure()
+    plt.plot(T[:,0]/60,T[:,1],label='Water temp')
+    plt.plot(T[:,0]/60,T[:,2],label='Aire temp')
+    plt.plot(T[:,0]/60,T[:,3],label='Air humidity')
+    plt.xlabel('time [min]'); plt.ylabel('Environment variables (degrees / %)')
+    plt.legend()
+    
+    return
+
+###############################################################################
+def createArduino():
+    serial_comm = "/dev/ttyUSB0"
+    baud_rate = 9600
+
+    # --- Configuración del puerto ---
+    arduino = serial.Serial(serial_comm, baud_rate, timeout=2)
+    time.sleep(2)  # espera a que Arduino reinicie
+    return arduino
+
+###############################################################################
+def medtemphum(arduino):
+    # t1, t2    -> ds18b20
+    # tdht, hum -> DHT11
+    arduino.reset_input_buffer()
+    arduino.reset_output_buffer()
+    arduino.write(b'R')
+    arduino.flush()
+    time.sleep(1)
+    line = arduino.readline().decode().strip()
+    if line:
+        try:
+            t1, t2, tdht, hum = map(float, line.split(","))
+            return t1, tdht, hum # descartamos t2
+        except ValueError:
+            return None
+    return None
 
 ###############################################################################
 class oscrigol_pacter(object):
@@ -77,9 +144,9 @@ class oscrigol_pacter(object):
                             two channels = AUTO|7000|70000|700000|7000000|28000000
     
     Output:
-        A numpy array containing
-            Row 0: time values
-            Row i: vertical values of channel i
+        t: time axis (Nt,) [s]
+        v1: optoacoustic signals (Nt,) [V]
+        v2m: maximum value piroelectric signal [V]
     """
     
     ##########################################################################
@@ -108,7 +175,7 @@ class oscrigol_pacter(object):
 
         # Set Trigger
         self.setEdgeTrigger(self._trigSource, self._trigSlope, self._trigCoup,self._trigLevel)
-        
+
         # Set channels 
         for i in range(len(self._channels)):
             self.setChannel(self._channels[i],self._chanBand[i],self._chanCoup[i],
@@ -129,7 +196,7 @@ class oscrigol_pacter(object):
         # Get Vertical values
         for i in tqdm(range(int(self._acquisition))):
             if i==0:
-                v1, v2m = self.getchannels((1,),mdepth) 
+                v1, v2m = self.getchannels((1,),mdepth)
             else:
                 v1aux, v2maux = self.getchannels((1,),mdepth) 
                 v1 = v1 + v1aux
@@ -166,9 +233,10 @@ class oscrigol_pacter(object):
     ############################
     # Configuration
     ############################
-    def config(self, channels, chanBand, chanCoup, chanInv, chanImp,
-               trigSource, trigCoup, trigLevel, trigSlope,
-               acquisition, mdepth):
+    def config(self, acquisition, mdepth, 
+               channels = (1,2), chanBand = ('20M','20M'), chanCoup = ('AC','DC'),
+               chanInv = ('OFF','OFF'), chanImp = ('FIFT','OMEG'),
+               trigSource = 'EXT', trigCoup = 'AC', trigLevel = 0.5, trigSlope = 'POS'):
         
         self._channels = channels
         self._chanBand = chanBand
@@ -266,19 +334,17 @@ class oscrigol_pacter(object):
         return values
     
     def getchannels(self, channels, mdepth):
+        self.run()
         time.sleep(1) # wait until the acquisition is completed
         self.stop()
         for i in range(len(channels)):
-            if i<1:
+            if i == 0:
                 MV = self.getVertvalues(channels[i], mdepth)
             else:
-                if i == 0:
-                    MV = self.getVertvalues(channels[i], mdepth)
-                else:
-                    MV = np.vstack((MV, self.getVertvalues(self._channels[i], mdepth))) 
+                MV = np.vstack((MV, self.getVertvalues(self._channels[i], mdepth))) 
         
         # Get the maximum value of channel 2
-        V2MAX = self._osci.query(":MEASure:VMAX? CHANnel2")
+        V2MAX = float(self._osci.query(":MEASure:VMAX? CHANnel2"))
         self.run()
         return MV, V2MAX
     
@@ -294,7 +360,14 @@ class oscrigol_pacter(object):
         Ttotal = mdepth / Srate
         if Tscreen < Ttotal:
             print('Warning: the time window is larger than what is shown on the screen!')
-            values = np.linspace(-Ttotal/2,Ttotal/2,mdepth) - hoffset
+            values = np.linspace(-Ttotal/2,Ttotal/2,mdepth) + hoffset
         else:
-            values = np.linspace(-Tscreen/2,Tscreen/2,mdepth) - hoffset
+            values = np.linspace(-Tscreen/2,Tscreen/2,mdepth) + hoffset
         return values
+
+    ################################    
+    # Medicion temperatura y humedad
+    ################################
+    def getTempHum(self):
+        Tw, Ta, RH = medtemphum()
+        return Tw, Ta, RH
