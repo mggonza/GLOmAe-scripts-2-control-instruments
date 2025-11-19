@@ -215,16 +215,14 @@ class oscrigol(object):
         return values
     
     def getchannels(self, channels, mdepth):
+        self.run()
         time.sleep(1) # wait until the acquisition is completed
         self.stop()
         for i in range(len(channels)):
-            if i<1:
+            if i == 0:
                 MV = self.getVertvalues(channels[i], mdepth)
             else:
-                if i == 0:
-                    MV = self.getVertvalues(channels[i], mdepth)
-                else:
-                    MV = np.vstack((MV, self.getVertvalues(self._channels[i], mdepth))) 
+                MV = np.vstack((MV, self.getVertvalues(self._channels[i], mdepth))) 
         self.run()
         return MV
     
