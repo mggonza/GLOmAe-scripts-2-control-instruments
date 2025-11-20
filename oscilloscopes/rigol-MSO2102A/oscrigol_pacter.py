@@ -20,7 +20,8 @@ def pacter_med(Nmed = 1, acq=16, mdepth=70000, saveresults=True):
     		t: time axis (Nt,) [s]
     		MV: voltage signals (Nmed,Nt) [V]
     		E: laser energy measurements (Nmed,) [J]
-    		T: time [s], water temperature [°C], air temperature [°C] and air relative humidity [%] (Nmed,4)  
+    		T: elapsed time [s], water temperature [°C], 
+            air temperature [°C] and air relative humidity [%] (Nmed,4)  
     
     """
       
@@ -60,7 +61,7 @@ def pacter_med(Nmed = 1, acq=16, mdepth=70000, saveresults=True):
         # Relevar tiempo pasado, temperatura agua, temperatura aire y humedad
         #Tw, Ta, RH = 0.0, 0.0, 0.0 
         Tw, Ta, RH = medtemphum(arduino)
-        print("Tw =",Tw,"Ta =",Ta,"RH =",RH)
+        #print("Tw =",Tw,"Ta =",Ta,"RH =",RH)
         
         TT = time.perf_counter() - start  # [s]
         
@@ -87,17 +88,20 @@ def plotresults(t, MV, E, T):
     plt.figure()
     for i in range(MV.shape[0]):
         plt.plot(t*1e6,MV[i,:]*1e3)
-        plt.xlabel('time [us]'); plt.ylabel('Amplitude [mV]')
+        plt.grid(linestyle = '--')
+        plt.xlabel('elapsed time [us]'); plt.ylabel('Amplitude [mV]')
 
     plt.figure()
-    plt.plot(T[:,0]/60,E*1e3)
-    plt.xlabel('time [min]'); plt.ylabel('Energy laser [mJ]')
+    plt.plot(T[:,0]/60,E*1e3,'s-')
+    plt.grid(linestyle = '--')
+    plt.xlabel('elapsed time [min]'); plt.ylabel('Energy laser [mJ]')
 
     plt.figure()
-    plt.plot(T[:,0]/60,T[:,1],label='Water temp')
-    plt.plot(T[:,0]/60,T[:,2],label='Aire temp')
-    plt.plot(T[:,0]/60,T[:,3],label='Air humidity')
-    plt.xlabel('time [min]'); plt.ylabel('Environment variables (degrees / %)')
+    plt.plot(T[:,0]/60,T[:,1],'*-',label='Water temp (°C)')
+    plt.plot(T[:,0]/60,T[:,2],'o-',label='Aire temp (°C)')
+    plt.plot(T[:,0]/60,T[:,3],'s-',label='Air humidity (%)')
+    plt.grid(linestyle = '--')
+    plt.xlabel('elapsed time [min]'); plt.ylabel('Environment variables')
     plt.legend()
     
     return
