@@ -1,0 +1,6 @@
+# Ignore python files
+__pycache__/
+
+# Local files
+*.jsonl
+*.jsonl
