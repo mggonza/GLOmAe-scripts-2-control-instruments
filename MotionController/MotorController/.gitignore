@@ -2,5 +2,5 @@
 __pycache__/
 
 # Local files
-*.jsonl
+*.json
 *.jsonl
