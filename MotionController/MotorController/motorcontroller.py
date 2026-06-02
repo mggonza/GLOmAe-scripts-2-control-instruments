@@ -420,6 +420,156 @@ class MotorController:
         
         raise ValueError(f"Patrón no soportado: {pattern}")
 
+    def scan_points(
+        self,
+        points,
+        feed: float = 80.0,
+        reverse: bool = False,
+        wait_mode: str = "none",
+        delay_s: float = 0.0,
+        on_point=None,
+        on_fail: str = "retry",
+        return_home: bool = False,
+    ):
+        """
+        Ejecuta una lista de puntos lógicos (x, y).
+
+        Esta función centraliza la lógica de movimiento, callbacks,
+        manejo de fallos, validación de límites y retorno a home.
+
+        points:
+            Lista de tuplas [(x, y), ...] en coordenadas lógicas.
+        """
+
+        if reverse:
+            points = list(reversed(points))
+
+        # Validación preventiva: evita iniciar si algún punto excede límites.
+        for x, y in points:
+            self._check_limits(x, y, self.position["z"])
+
+        self._log_event(
+            "scan_points_start",
+            n_points=len(points),
+            feed=feed,
+            reverse=reverse,
+            wait_mode=wait_mode,
+            delay_s=delay_s,
+            on_fail=on_fail,
+        )
+
+        i = 0
+
+        try:
+            while i < len(points):
+                x, y = points[i]
+
+                self.move_absolute(
+                    x=x,
+                    y=y,
+                    z=self.position["z"],
+                    feed=feed,
+                    wait_idle=True,
+                )
+
+                self._log_event(
+                    "scan_point",
+                    index=i,
+                    x=x,
+                    y=y,
+                    z=self.position["z"],
+                )
+
+                point_ok = True
+                result = None
+
+                if on_point is not None:
+                    result = on_point(i, x, y)
+
+                    if isinstance(result, bool):
+                        point_ok = result
+                    elif isinstance(result, dict):
+                        point_ok = bool(result.get("ok", True))
+
+                if point_ok:
+                    if wait_mode == "delay" and delay_s > 0:
+                        time.sleep(delay_s)
+
+                    elif wait_mode == "user":
+                        input(
+                            f"Punto {i} listo en ({x:.3f}, {y:.3f}). "
+                            "Enter para continuar..."
+                        )
+
+                    i += 1
+                    continue
+
+                self._log_event(
+                    "scan_point_failed",
+                    index=i,
+                    x=x,
+                    y=y,
+                    z=self.position["z"],
+                    result=result,
+                )
+
+                action = on_fail
+
+                if isinstance(result, dict) and "action" in result:
+                    action = result["action"]
+
+                if action == "retry":
+                    continue
+
+                if action == "skip":
+                    i += 1
+                    continue
+
+                if action == "abort":
+                    self._log_event(
+                        "scan_points_abort",
+                        index=i,
+                        x=x,
+                        y=y,
+                        z=self.position["z"],
+                        result=result,
+                    )
+                    break
+
+                if action == "wait_user":
+                    user = input(
+                        f"Fallo en punto {i} ({x:.3f}, {y:.3f}). "
+                        "[c] continuar, [r] reintentar, [s] saltear, [a] abortar: "
+                    ).strip().lower()
+
+                    if user == "r":
+                        continue
+
+                    if user == "s":
+                        i += 1
+                        continue
+
+                    if user == "a":
+                        self._log_event(
+                            "scan_points_abort_user",
+                            index=i,
+                            x=x,
+                            y=y,
+                            z=self.position["z"],
+                        )
+                        break
+
+                    i += 1
+                    continue
+
+                raise ValueError(f"Acción on_fail no soportada: {action}")
+
+        finally:
+            if return_home:
+                self.go_home(feed=feed)
+
+            self._log_event("scan_points_end")
+
     def scan_grid(self, 
                   rows: int, cols: int, 
                   step_x: float = 0.1, step_y: float = 0.1, step_z: float = 0.0, 
@@ -449,58 +599,46 @@ class MotorController:
                         pattern=pattern, centered=centered, reverse=reverse,
                         wait_mode=wait_mode, delay_s=delay_s, on_fail=on_fail)
 
-        i = 0
         try:
-            while i < len(points):
-                x, y = points[i]
-                self.move_absolute(x=x, y=y, z=self.position["z"], feed=feed, wait_idle=True)
-                self._log_event("scan_grid_point", index=i, x=x, y=y, z=self.position["z"])
+            points = self._generate_grid_points(
+                rows=rows,
+                cols=cols,
+                step_x=step_x,
+                step_y=step_y,
+                drift_xy=drift_xy,
+                drift_yx=drift_yx,
+                pattern=pattern,
+                centered=centered,
+            )
 
-                point_ok = True
-                result = None
+            self._log_event(
+                "scan_grid_start",
+                rows=rows,
+                cols=cols,
+                step_x=step_x,
+                step_y=step_y,
+                step_z=step_z,
+                drift_xy=drift_xy,
+                drift_yx=drift_yx,
+                feed=feed,
+                pattern=pattern,
+                centered=centered,
+                reverse=reverse,
+                wait_mode=wait_mode,
+                delay_s=delay_s,
+                on_fail=on_fail,
+            )
 
-                if on_point is not None:
-                    result = on_point(i, x, y)
-                    if isinstance(result, bool):
-                        point_ok = result
-                    elif isinstance(result, dict):
-                        point_ok = bool(result.get("ok", True))
-
-                if point_ok:
-                    if wait_mode == "delay" and delay_s > 0:
-                        time.sleep(delay_s)
-                    elif wait_mode == "user":
-                        input(f"Punto {i} listo en ({x:.4f}, {y:.4f}). Enter para continuar...")
-                    i += 1
-                    continue
-
-                self._log_event("scan_grid_point_failed", index=i, x=x, y=y, z=self.position["z"], result=result)
-                action = on_fail
-                if isinstance(result, dict) and "action" in result:
-                    action = result["action"]
-
-                if action == "retry":
-                    continue
-                if action == "skip":
-                    i += 1
-                    continue
-                if action == "abort":
-                    self._log_event("scan_grid_abort", index=i, x=x, y=y, z=self.position["z"], result=result)
-                    break
-                if action == "wait_user":
-                    user = input(f"Fallo en punto {i} ({x:.4f}, {y:.4f}). [c] continuar, [r] reintentar, [s] saltear, [a] abortar: ").strip().lower()
-                    if user == "r":
-                        continue
-                    if user == "s":
-                        i += 1
-                        continue
-                    if user == "a":
-                        self._log_event("scan_grid_abort_user", index=i, x=x, y=y, z=self.position["z"])
-                        break
-                    i += 1
-                    continue
-
-                raise ValueError(f"Acción on_fail no soportada: {action}")
+            return self.scan_points(
+                points=points,
+                feed=feed,
+                reverse=reverse,
+                wait_mode=wait_mode,
+                delay_s=delay_s,
+                on_point=on_point,
+                on_fail=on_fail,
+                return_home=return_home,
+            )
 
         finally:
             if return_home:
@@ -517,7 +655,6 @@ class MotorController:
         bottom_right: tuple[float, float],
         feed: float = 80.0,
         pattern: str = "zigzag",
-        centered: bool = True,
         reverse: bool = False,
         wait_mode: str = "none",
         delay_s: float = 0.0,
@@ -526,64 +663,231 @@ class MotorController:
         return_home: bool = False,
     ):
         """
-        Wrapper de scan_grid().
+        Wrapper de scan_points() que genera una grilla calibrada a partir
+        de cuatro esquinas medidas.
 
-        Calcula step_x, step_y, drift_xy y drift_yx a partir de cuatro esquinas
-        medidas respecto del centro lógico, y luego ejecuta scan_grid().
+        Las esquinas deben estar expresadas como posiciones lógicas absolutas
+        respecto del home/origen de medición.
+
+        Esta estrategia fuerza que:
+        - primera esquina superior coincida con top_left
+        - última esquina superior coincida con top_right
+        - primera esquina inferior coincida con bottom_left
+        - última esquina inferior coincida con bottom_right
         """
 
         if rows < 2 or cols < 2:
-            raise ValueError("rows y cols deben ser >= 2 para calibración con esquinas")
+            raise ValueError("rows y cols deben ser >= 2 para usar cuatro esquinas")
 
-        width_top = top_right[0] - top_left[0]
-        width_bottom = bottom_right[0] - bottom_left[0]
+        if pattern not in ("raster", "zigzag"):
+            raise ValueError("pattern debe ser 'raster' o 'zigzag'")
 
-        height_left = top_left[1] - bottom_left[1]
-        height_right = top_right[1] - bottom_right[1]
+        points = []
 
-        avg_width = (width_top + width_bottom) / 2.0
-        avg_height = (height_left + height_right) / 2.0
+        for r in range(rows):
+            v = r / (rows - 1)
+            row_points = []
 
-        step_x = abs(avg_width) / (cols - 1)
-        step_y = abs(avg_height) / (rows - 1)
+            for c in range(cols):
+                u = c / (cols - 1)
 
-        # Corrección de X al avanzar en Y.
-        drift_xy_left = (bottom_left[0] - top_left[0]) / avg_height
-        drift_xy_right = (bottom_right[0] - top_right[0]) / avg_height
-        drift_xy = (drift_xy_left + drift_xy_right) / 2.0
+                # Interpolación bilineal entre las cuatro esquinas.
+                x = (
+                    (1 - u) * (1 - v) * top_left[0]
+                    + u * (1 - v) * top_right[0]
+                    + (1 - u) * v * bottom_left[0]
+                    + u * v * bottom_right[0]
+                )
 
-        # Corrección de Y al avanzar en X.
-        drift_yx_top = (top_right[1] - top_left[1]) / avg_width
-        drift_yx_bottom = (bottom_right[1] - bottom_left[1]) / avg_width
-        drift_yx = (drift_yx_top + drift_yx_bottom) / 2.0
+                y = (
+                    (1 - u) * (1 - v) * top_left[1]
+                    + u * (1 - v) * top_right[1]
+                    + (1 - u) * v * bottom_left[1]
+                    + u * v * bottom_right[1]
+                )
+
+                row_points.append((round(x, 3), round(y, 3)))
+
+            if pattern == "zigzag" and r % 2 == 1:
+                row_points.reverse()
+
+            points.extend(row_points)
 
         self._log_event(
-            "scan_grid_calibrated_params",
+            "scan_grid_calibrated_start",
             rows=rows,
             cols=cols,
             top_left=top_left,
             top_right=top_right,
             bottom_left=bottom_left,
             bottom_right=bottom_right,
-            avg_width=avg_width,
-            avg_height=avg_height,
-            step_x=step_x,
-            step_y=step_y,
-            drift_xy=drift_xy,
-            drift_yx=drift_yx,
-        )
-
-        return self.scan_grid(
-            rows=rows,
-            cols=cols,
-            step_x=step_x,
-            step_y=step_y,
-            step_z=0.0,
-            drift_xy=drift_xy,
-            drift_yx=drift_yx,
             feed=feed,
             pattern=pattern,
-            centered=centered,
+            reverse=reverse,
+            wait_mode=wait_mode,
+            delay_s=delay_s,
+            on_fail=on_fail,
+        )
+
+        return self.scan_points(
+            points=points,
+            feed=feed,
+            reverse=reverse,
+            wait_mode=wait_mode,
+            delay_s=delay_s,
+            on_point=on_point,
+            on_fail=on_fail,
+            return_home=return_home,
+        )
+
+
+    def _generate_points_from_calibration_grid(
+        self,
+        calibration_grid: dict,
+        cal_rows: int,
+        cal_cols: int,
+        rows: int,
+        cols: int,
+        pattern: str = "zigzag",
+    ):
+        """
+        Genera puntos interpolados a partir de una grilla de calibración medida.
+
+        calibration_grid:
+            Diccionario con claves (r, c) y valores (x, y), usando índices base 0.
+
+            Ejemplo para calibración 3x3:
+            {
+                (0, 0): (8.3, 10.5),
+                (0, 1): (0.4, 10.5),
+                (0, 2): (-7.1, 10.5),
+                ...
+            }
+
+        cal_rows, cal_cols:
+            Tamaño de la grilla de calibración medida.
+
+        rows, cols:
+            Tamaño de la grilla final deseada.
+
+        pattern:
+            'raster' o 'zigzag'.
+        """
+
+        if rows < 1 or cols < 1:
+            raise ValueError("rows y cols deben ser >= 1")
+
+        if cal_rows < 2 or cal_cols < 2:
+            raise ValueError("La grilla de calibración debe tener al menos 2x2 puntos")
+
+        if pattern not in ("raster", "zigzag"):
+            raise ValueError("pattern debe ser 'raster' o 'zigzag'")
+
+        # Verifica que la grilla de calibración esté completa.
+        for r in range(cal_rows):
+            for c in range(cal_cols):
+                if (r, c) not in calibration_grid:
+                    raise ValueError(f"Falta punto de calibración {(r, c)}")
+
+        points = []
+
+        for r in range(rows):
+            # Coordenada vertical continua dentro de la grilla calibrada.
+            v_global = r * (cal_rows - 1) / (rows - 1) if rows > 1 else 0.0
+
+            r0 = int(v_global)
+            r1 = min(r0 + 1, cal_rows - 1)
+            v = v_global - r0
+
+            row_points = []
+
+            for c in range(cols):
+                # Coordenada horizontal continua dentro de la grilla calibrada.
+                u_global = c * (cal_cols - 1) / (cols - 1) if cols > 1 else 0.0
+
+                c0 = int(u_global)
+                c1 = min(c0 + 1, cal_cols - 1)
+                u = u_global - c0
+
+                p00 = calibration_grid[(r0, c0)]
+                p01 = calibration_grid[(r0, c1)]
+                p10 = calibration_grid[(r1, c0)]
+                p11 = calibration_grid[(r1, c1)]
+
+                # Interpolación bilineal local dentro de cada celda.
+                x = (
+                    (1 - u) * (1 - v) * p00[0]
+                    + u * (1 - v) * p01[0]
+                    + (1 - u) * v * p10[0]
+                    + u * v * p11[0]
+                )
+
+                y = (
+                    (1 - u) * (1 - v) * p00[1]
+                    + u * (1 - v) * p01[1]
+                    + (1 - u) * v * p10[1]
+                    + u * v * p11[1]
+                )
+
+                row_points.append((round(x, 3), round(y, 3)))
+
+            if pattern == "zigzag" and r % 2 == 1:
+                row_points.reverse()
+
+            points.extend(row_points)
+
+        return points
+    
+    def scan_from_calibration_grid(
+        self,
+        calibration_grid: dict,
+        cal_rows: int,
+        cal_cols: int,
+        rows: int,
+        cols: int,
+        feed: float = 80.0,
+        pattern: str = "zigzag",
+        reverse: bool = False,
+        wait_mode: str = "none",
+        delay_s: float = 0.0,
+        on_point=None,
+        on_fail: str = "retry",
+        return_home: bool = False,
+    ):
+        """
+        Wrapper de scan_points() que genera una grilla interpolada a partir
+        de una grilla de calibración medida completa.
+
+        Si rows/cols coinciden con cal_rows/cal_cols, los puntos generados
+        coinciden con los puntos medidos.
+        """
+
+        points = self._generate_points_from_calibration_grid(
+            calibration_grid=calibration_grid,
+            cal_rows=cal_rows,
+            cal_cols=cal_cols,
+            rows=rows,
+            cols=cols,
+            pattern=pattern,
+        )
+
+        self._log_event(
+            "scan_from_calibration_grid_start",
+            cal_rows=cal_rows,
+            cal_cols=cal_cols,
+            rows=rows,
+            cols=cols,
+            feed=feed,
+            pattern=pattern,
+            reverse=reverse,
+            wait_mode=wait_mode,
+            delay_s=delay_s,
+            on_fail=on_fail,
+        )
+
+        return self.scan_points(
+            points=points,
+            feed=feed,
             reverse=reverse,
             wait_mode=wait_mode,
             delay_s=delay_s,
