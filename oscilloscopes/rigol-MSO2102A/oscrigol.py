@@ -267,7 +267,6 @@ class oscrigol(object):
         for i in range(len(channels)):
             if i == 0:
                 MV = self.getVertValues(channels[i], mdepth)
-                print(MV)
             else:
                 MV = np.vstack((MV, self.getVertValues(self._channels[i], mdepth))) 
         self.run()
@@ -376,6 +375,9 @@ class oscrigol(object):
         if channels is None:
             channels = self._channels
 
+        # Init communication
+        self.initComm()
+        
         # Configuración del modo de adquisición
         # PEAK permite capturar excursiones máximas y mínimas
         if mode.upper() in ("PEAK", "PDET", "PEAKDETECT"):
@@ -560,5 +562,8 @@ class oscrigol(object):
 
         # Reanudar adquisición continua
         self.run()
+
+        # Close communication
+        self.closeComm()
 
         return adjusted
