@@ -1,21 +1,21 @@
 import pyvisa
 import numpy as np
 import time
-from tqdm import tqdm 
+from tqdm import tqdm
 
 ###############################################################################
 class oscrigol(object):
     """
     Class for handling Rigol MSO2102A oscilloscopes using PyVISA TCP/IP interface.
     Compatible with the GLOmAe structure (mirrors Tektronix osctck.py design).
-    
+
     Input parameters:
         *Conectivity
         _resource: ip_address='192.168.2.2'
         *Channels
         _channels: (1,) or (2,) or (1,2)
         _chanBand: ('value ch1', 'value ch2')--> value = OFF | OFF; if '20M' BW == 20 MHz
-        _chanCoup: ('value ch1','value ch2')--> value = DC | AC | GND  
+        _chanCoup: ('value ch1','value ch2')--> value = DC | AC | GND
         _chanInv: ('value ch1','value ch2')--> value = OFF | ON
         _chanImp: ('value ch1','value ch2')--> value = OMEG|FIFTy
         *Trigger
@@ -27,13 +27,13 @@ class oscrigol(object):
         _acquisition = value --> 1 (RAW)
         _mdepth = value --> only 1 channel = AUTO|14000|140000|1400000|14000000|56000000
                             two channels = AUTO|7000|70000|700000|7000000|28000000
-    
+
     Output:
         A numpy array containing
             Row 0: time values
             Row i: vertical values of channel i
     """
-    
+
     ##########################################################################
     def __init__(self, ip_address="192.168.2.2"):
         # Resource string for VISA-TCPIP interface
@@ -54,14 +54,14 @@ class oscrigol(object):
     # Main call
     ############################
     def __call__(self):
-        
+
         # Init communication
         self.initComm()
 
         # Set Trigger
         self.setEdgeTrigger(self._trigSource, self._trigSlope, self._trigCoup,self._trigLevel)
-        
-        # Set channels 
+
+        # Set channels
         for i in range(len(self._channels)):
             self.setChannel(self._channels[i],self._chanBand[i],self._chanCoup[i],
                          self._chanInv[i], self._chanImp[i])
@@ -77,24 +77,24 @@ class oscrigol(object):
             v1 = 0
             v2m = 0
             return t, v1, v2m
-        
+
         # Get Vertical values
         for i in tqdm(range(int(self._acquisition))):
             if i==0:
                 v1, v2m = self.getchannels((1,),mdepth)
             else:
-                v1aux, v2maux = self.getchannels((1,),mdepth) 
+                v1aux, v2maux = self.getchannels((1,),mdepth)
                 v1 = v1 + v1aux
                 v2m = v2m + v2maux
         v1 = v1 / int(self._acquisition)
         v2m = v2m / int(self._acquisition)
-                              
+
         # Get Horizontal values
         t = self.getHorValues(mdepth)
-        
+
         # Close communication
         self.closeComm()
-        
+
         return t, v1, v2m
 
     ############################
@@ -105,7 +105,6 @@ class oscrigol(object):
         self._osci.timeout = 5000
         self._osci.write(":WAV:FORM BYTE")
         self._osci.write(":WAV:MODE NORM")
-        #self._osci.write(":WAV:POIN 1400")  # number of points per waveform
         return
 
     def closeComm(self):
@@ -114,15 +113,15 @@ class oscrigol(object):
 
     def getID(self):
         return self._osci.query("*IDN?")
-    
+
     ############################
     # Configuration
     ############################
-    def config(self, channels=(1,), chanBand=('OFF',), chanCoup=('AC',), 
+    def config(self, channels=(1,), chanBand=('OFF',), chanCoup=('AC',),
                chanInv=('OFF',), chanImp = ('OMEG',),
                trigSource='CHAN1', trigCoup='AC', trigLevel=0.0, trigSlope = 'POS',
                acquisition=1,mdepth=14000):
-        
+
         self._channels = channels
         self._chanBand = chanBand
         self._chanCoup = chanCoup
@@ -135,7 +134,7 @@ class oscrigol(object):
         self._acquisition = acquisition
         self._mdepth = mdepth
         return
-    
+
     ############################
     # Acquisition control
     ############################
@@ -149,29 +148,24 @@ class oscrigol(object):
 
     def setSampAcquisition(self):
         self._osci.write(":ACQ:TYPE NORM")
-        #time.sleep(0.5)
         return
 
     def setandcheckmdepth(self,mdepth):
         self._osci.write(f":ACQ:MDEP {int(mdepth)}")
-        #time.sleep(0.5)
         mdepthread = self._osci.query(f":ACQ:MDEP?")
-        #time.sleep(0.5)
         if int(mdepthread) != int(mdepth):
             print("The requested memory depth is incorrect.")
             return 1
         else:
-            return 0            
-   
+            return 0
+
     def setPeakAcquisition(self):
         self._osci.write(":ACQ:TYPE PEAK")
-        #time.sleep(0.5)
         return
 
     def setAvgAcquisition(self, nAvg=16):
         self._osci.write(":ACQ:TYPE AVER")
         self._osci.write(f":ACQ:AVER {int(nAvg)}")
-        #time.sleep(0.5)
         return
 
     def setAcquisitionMode(self, mode="PEAK", nAvg=16):
@@ -190,8 +184,8 @@ class oscrigol(object):
             raise ValueError("mode must be 'NORM', 'PEAK' or 'AVG'")
 
         return
-    
-    ############################    
+
+    ############################
     # Trigger configuration
     ############################
     def setEdgeTrigger(self, source="CHAN1", slope="POS", coupling="AC", level=0.0):
@@ -202,9 +196,9 @@ class oscrigol(object):
         self._osci.write(f":TRIG:EDG:LEV {level}")
         self._osci.write(f":TRIG:SWE NORMAL")
         return
-    
 
-    ############################    
+
+    ############################
     # Horizontal configuration
     ############################
     def getHorValues(self, mdepth):
@@ -220,24 +214,24 @@ class oscrigol(object):
         else:
             values = np.linspace(-Tscreen/2,Tscreen/2,mdepth) + hoffset
         return values
-    
+
     def setHorScale(self, hScale, zero=0):
         self._osci.write(f":TIM:SCAL {hScale}")
         self._osci.write(f":TIM:OFFS {zero}")
         return
 
-    ############################    
+    ############################
     # Vertical configuration
     ############################
-    def getVertScale(self, channel): 
+    def getVertScale(self, channel):
         return float(self._osci.query(f":CHAN{channel}:SCAL?"))
 
-    def getVertOffset(self, channel): 
+    def getVertOffset(self, channel):
         return float(self._osci.query(f":CHAN{channel}:OFFS?"))
 
-    def getVertValues(self, channel, mem_depth,delay_time=1):        
+    def getVertValues(self, channel, mem_depth, delay_time=0.5):
         chunk_size = 2**20
-        
+
         self._osci.write(f":WAV:SOUR CHAN{channel}")
         self._osci.write(":WAV:FORM BYTE")
         self._osci.write(":WAV:MODE RAW")
@@ -246,42 +240,38 @@ class oscrigol(object):
         self._osci.write(f":WAV:STOP {int(mem_depth)}")
         self._osci.write(":WAV:RES")
         self._osci.write(":WAV:BEG")
-        #time.sleep(delay_time)
-        #time.sleep(0.5)
-        time.sleep(0.5)
+        time.sleep(delay_time)
 
-        raw = self._osci.query_binary_values(":WAV:DATA?", datatype='B', 
-                                             container=np.array, 
+        raw = self._osci.query_binary_values(":WAV:DATA?", datatype='B',
+                                             container=np.array,
                                              chunk_size=chunk_size)
-        #time.sleep(delay_time)
         time.sleep(0.2)
         values = np.array(raw)
         vscale = self.getVertScale(channel)
         offset = self.getVertOffset(channel)
         ref = 127.0
         div = 25.4
-        # IMPORTANT: The vertical axis has 10 divisions, 
+        # IMPORTANT: The vertical axis has 10 divisions,
         #            but only 8 are visible on the screen.
-        
+
         values = (values*1.0 - ref)/div * vscale - offset
         return values
-    
+
     def getchannels(self, channels, mdepth):
         self.run()
-        #time.sleep(1) # wait until the acquisition is completed
         time.sleep(0.5)
         self.stop()
         for i in range(len(channels)):
             if i == 0:
                 MV = self.getVertValues(channels[i], mdepth)
             else:
-                MV = np.vstack((MV, self.getVertValues(channels[i], mdepth))) 
-        
+                MV = np.vstack((MV, self.getVertValues(channels[i], mdepth)))
+
         # Get the maximum value of channel 2
         V2MAX = float(self._osci.query(":MEASure:VMAX? CHANnel2"))
         self.run()
         return MV, V2MAX
-    
+
     def getVMax(self, channel):
         vmax=float(self._osci.query(f":MEASure:VMAX? CHANnel{channel}"))
         return vmax
@@ -289,7 +279,7 @@ class oscrigol(object):
     def getVMin(self, channel):
         vmin = float(self._osci.query(f":MEASure:VMIN? CHANnel{channel}"))
         return vmin
-    
+
     def setVertScale(self, channel, vScale):
         self._osci.write(f":CHAN{channel}:SCAL {vScale}")
         return
@@ -303,8 +293,8 @@ class oscrigol(object):
         self._osci.write(f":CHAN{channel}:COUP {chanCoup}")
         self._osci.write(f":CHAN{channel}:INV {chanInv}")
         self._osci.write(f":CHAN{channel}:IMP {chanImp}")
-        return 
-    
+        return
+
     ############################
     # Auto-adjust vertical scale
     ############################
@@ -318,7 +308,7 @@ class oscrigol(object):
         mantissa = scale / 10**exponent
         rounded = steps[np.searchsorted(steps, mantissa)] * (10**exponent)
 
-        return rounded 
+        return rounded
 
     def _is_invalid_measurement(self, value, invalid_threshold=1e30):
         return (not np.isfinite(value)) or (abs(value) > invalid_threshold)
@@ -387,7 +377,7 @@ class oscrigol(object):
 
         # Init communication
         self.initComm()
-        
+
         # Configuración del modo de adquisición
         # PEAK permite capturar excursiones máximas y mínimas
         if mode.upper() in ("PEAK", "PDET", "PEAKDETECT"):
@@ -409,7 +399,7 @@ class oscrigol(object):
 
         # Procesar cada canal
         for ch in channels:
-        
+
             adjusted[ch] = False
 
             # Iteraciones de ajuste si la señal está inicialmente fuera de rango
