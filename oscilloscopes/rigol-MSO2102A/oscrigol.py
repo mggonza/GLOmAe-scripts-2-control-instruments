@@ -73,25 +73,29 @@ class oscrigol(object):
         check = self.setandcheckmdepth(mdepth)
         if check:
             self.closeComm()
-            values = 0
-            return values
+            t = 0
+            v1 = 0
+            v2m = 0
+            return t, v1, v2m
         
         # Get Vertical values
         for i in tqdm(range(int(self._acquisition))):
             if i==0:
-                MV = self.getchannels(self._channels,mdepth) 
+                v1, v2m = self.getchannels((1,),mdepth)
             else:
-                MV = MV + self.getchannels(self._channels,mdepth) 
-        MV = MV / int(self._acquisition)
+                v1aux, v2maux = self.getchannels((1,),mdepth) 
+                v1 = v1 + v1aux
+                v2m = v2m + v2maux
+        v1 = v1 / int(self._acquisition)
+        v2m = v2m / int(self._acquisition)
                               
         # Get Horizontal values
-        values = self.getHorValues(mdepth)
-        values = np.vstack((values, MV)) 
+        t = self.getHorValues(mdepth)
         
         # Close communication
         self.closeComm()
         
-        return values
+        return t, v1, v2m
 
     ############################
     # Communication control
@@ -145,14 +149,14 @@ class oscrigol(object):
 
     def setSampAcquisition(self):
         self._osci.write(":ACQ:TYPE NORM")
-        time.sleep(0.5)
+        #time.sleep(0.5)
         return
 
     def setandcheckmdepth(self,mdepth):
         self._osci.write(f":ACQ:MDEP {int(mdepth)}")
-        time.sleep(0.5)
+        #time.sleep(0.5)
         mdepthread = self._osci.query(f":ACQ:MDEP?")
-        time.sleep(0.5)
+        #time.sleep(0.5)
         if int(mdepthread) != int(mdepth):
             print("The requested memory depth is incorrect.")
             return 1
@@ -161,13 +165,13 @@ class oscrigol(object):
    
     def setPeakAcquisition(self):
         self._osci.write(":ACQ:TYPE PEAK")
-        time.sleep(0.5)
+        #time.sleep(0.5)
         return
 
     def setAvgAcquisition(self, nAvg=16):
         self._osci.write(":ACQ:TYPE AVER")
         self._osci.write(f":ACQ:AVER {int(nAvg)}")
-        time.sleep(0.5)
+        #time.sleep(0.5)
         return
 
     def setAcquisitionMode(self, mode="PEAK", nAvg=16):
@@ -242,13 +246,15 @@ class oscrigol(object):
         self._osci.write(f":WAV:STOP {int(mem_depth)}")
         self._osci.write(":WAV:RES")
         self._osci.write(":WAV:BEG")
+        #time.sleep(delay_time)
         #time.sleep(0.5)
-        time.sleep(delay_time)
+        time.sleep(0.5)
 
         raw = self._osci.query_binary_values(":WAV:DATA?", datatype='B', 
                                              container=np.array, 
                                              chunk_size=chunk_size)
-        time.sleep(delay_time)
+        #time.sleep(delay_time)
+        time.sleep(0.2)
         values = np.array(raw)
         vscale = self.getVertScale(channel)
         offset = self.getVertOffset(channel)
@@ -262,15 +268,19 @@ class oscrigol(object):
     
     def getchannels(self, channels, mdepth):
         self.run()
-        time.sleep(1) # wait until the acquisition is completed
+        #time.sleep(1) # wait until the acquisition is completed
+        time.sleep(0.5)
         self.stop()
         for i in range(len(channels)):
             if i == 0:
                 MV = self.getVertValues(channels[i], mdepth)
             else:
-                MV = np.vstack((MV, self.getVertValues(self._channels[i], mdepth))) 
+                MV = np.vstack((MV, self.getVertValues(channels[i], mdepth))) 
+        
+        # Get the maximum value of channel 2
+        V2MAX = float(self._osci.query(":MEASure:VMAX? CHANnel2"))
         self.run()
-        return MV
+        return MV, V2MAX
     
     def getVMax(self, channel):
         vmax=float(self._osci.query(f":MEASure:VMAX? CHANnel{channel}"))
