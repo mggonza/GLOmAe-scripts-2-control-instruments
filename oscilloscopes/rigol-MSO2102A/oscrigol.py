@@ -35,9 +35,17 @@ class oscrigol(object):
     """
 
     ##########################################################################
-    def __init__(self, ip_address="192.168.2.2"):
-        # Resource string for VISA-TCPIP interface
-        self._resource = f"TCPIP0::{ip_address}::INSTR"
+    def __init__(self, ip_address="192.168.2.2", use_socket=False,
+                 socket_port=5555, visa_backend='@py'):
+        # Resource string for VISA-TCPIP interface.
+        # VXI-11/INSTR is kept as the default for backwards compatibility.
+        # Raw sockets reduce per-command latency on Rigol scopes.
+        self._ip_address = ip_address
+        self._use_socket = use_socket
+        self._socket_port = socket_port
+        self._visa_backend = visa_backend
+        self._resource = self._build_resource()
+        self._chunk_size = 2**20
         self._channels = (1,)
         self._chanBand = ('OFF',)
         self._chanCoup = ('AC',)
@@ -49,6 +57,25 @@ class oscrigol(object):
         self._trigSlope = 'POS'
         self._acquisition = 1
         self._mdepth = 14000
+        self._download_mode = "legacy"
+
+    def _build_resource(self):
+        if self._use_socket:
+            return f"TCPIP0::{self._ip_address}::{self._socket_port}::SOCKET"
+        return f"TCPIP0::{self._ip_address}::INSTR"
+
+    def setConnection(self, ip_address=None, use_socket=None, socket_port=None,
+                      visa_backend=None):
+        if ip_address is not None:
+            self._ip_address = ip_address
+        if use_socket is not None:
+            self._use_socket = use_socket
+        if socket_port is not None:
+            self._socket_port = socket_port
+        if visa_backend is not None:
+            self._visa_backend = visa_backend
+        self._resource = self._build_resource()
+        return
 
     ############################
     # Main call
@@ -101,8 +128,19 @@ class oscrigol(object):
     # Communication control
     ############################
     def initComm(self):
-        self._osci = pyvisa.ResourceManager('@py').open_resource(self._resource)
+        if self._visa_backend:
+            resource_manager = pyvisa.ResourceManager(self._visa_backend)
+        else:
+            resource_manager = pyvisa.ResourceManager()
+
+        self._osci = resource_manager.open_resource(self._resource)
         self._osci.timeout = 5000
+        self._osci.chunk_size = self._chunk_size
+
+        if self._use_socket:
+            self._osci.read_termination = '\n'
+            self._osci.write_termination = '\n'
+
         self._osci.write(":WAV:FORM BYTE")
         self._osci.write(":WAV:MODE NORM")
         return
@@ -120,7 +158,7 @@ class oscrigol(object):
     def config(self, channels=(1,), chanBand=('OFF',), chanCoup=('AC',),
                chanInv=('OFF',), chanImp = ('OMEG',),
                trigSource='CHAN1', trigCoup='AC', trigLevel=0.0, trigSlope = 'POS',
-               acquisition=1,mdepth=14000):
+               acquisition=1,mdepth=14000, download_mode=None):
 
         self._channels = channels
         self._chanBand = chanBand
@@ -133,6 +171,8 @@ class oscrigol(object):
         self._trigSlope = trigSlope
         self._acquisition = acquisition
         self._mdepth = mdepth
+        if download_mode is not None:
+            self._download_mode = download_mode.lower()
         return
 
     ############################
@@ -230,8 +270,6 @@ class oscrigol(object):
         return float(self._osci.query(f":CHAN{channel}:OFFS?"))
 
     def getVertValues(self, channel, mem_depth, delay_time=0.5):
-        chunk_size = 2**20
-
         self._osci.write(f":WAV:SOUR CHAN{channel}")
         self._osci.write(":WAV:FORM BYTE")
         self._osci.write(":WAV:MODE RAW")
@@ -243,8 +281,7 @@ class oscrigol(object):
         time.sleep(delay_time)
 
         raw = self._osci.query_binary_values(":WAV:DATA?", datatype='B',
-                                             container=np.array,
-                                             chunk_size=chunk_size)
+                                             container=np.array)
         time.sleep(0.2)
         values = np.array(raw)
         vscale = self.getVertScale(channel)
@@ -257,7 +294,82 @@ class oscrigol(object):
         values = (values*1.0 - ref)/div * vscale - offset
         return values
 
+    def getVertValuesFast(self, channel, mem_depth, delay_time=0.0,
+                          vscale=None, offset=None,
+                          waveform_timeout=5.0,
+                          waveform_poll_interval=0.005):
+        self._osci.write(f":WAV:SOUR CHAN{channel}")
+        self._osci.write(":WAV:FORM BYTE")
+        self._osci.write(":WAV:MODE RAW")
+        self._osci.write(f":WAV:POIN {int(mem_depth)}")
+        self._osci.write(":WAV:STAR 1")
+        self._osci.write(f":WAV:STOP {int(mem_depth)}")
+        self._osci.write(":WAV:RES")
+        self._osci.write(":WAV:BEG")
+        if delay_time > 0:
+            time.sleep(delay_time)
+
+        self.waitForWaveformRead(timeout_s=waveform_timeout,
+                                  poll_interval=waveform_poll_interval)
+
+        try:
+            raw = self._osci.query_binary_values(":WAV:DATA?", datatype='B',
+                                                 container=np.array)
+        finally:
+            self._osci.write(":WAV:END")
+        values = np.array(raw)
+        if values.size == 0:
+            raise RuntimeError(
+                "Rigol returned 0 waveform points after :WAV:STAT? reported IDLE."
+            )
+        if vscale is None:
+            vscale = self.getVertScale(channel)
+        if offset is None:
+            offset = self.getVertOffset(channel)
+        ref = 127.0
+        div = 25.4
+
+        values = (values*1.0 - ref)/div * vscale - offset
+        return values
+
+    def waitForWaveformRead(self, timeout_s=5.0, poll_interval=0.005):
+        start = time.perf_counter()
+        last_status = ""
+        while True:
+            last_status = self._osci.query(":WAV:STAT?").strip().upper()
+            state = last_status.split(",", 1)[0]
+            if state == "IDLE":
+                return last_status
+            if timeout_s is not None and (time.perf_counter() - start) > timeout_s:
+                raise TimeoutError(
+                    f"Timeout waiting for Rigol waveform read. Last status: {last_status}"
+                )
+            time.sleep(poll_interval)
+
+    def waitForSingleTrigger(self, timeout_s=5.0, poll_interval=0.005,
+                             arm_delay=0.05, require_state_change=True):
+        if arm_delay > 0:
+            time.sleep(arm_delay)
+
+        start = time.perf_counter()
+        saw_running_state = (arm_delay > 0) or (not require_state_change)
+        last_status = ""
+        while True:
+            last_status = self._osci.query(":TRIGger:STATus?").strip().upper()
+            if last_status != "STOP":
+                saw_running_state = True
+            if last_status == "STOP" and saw_running_state:
+                return last_status
+            if timeout_s is not None and (time.perf_counter() - start) > timeout_s:
+                raise TimeoutError(
+                    f"Timeout waiting for Rigol single trigger. Last status: {last_status}"
+                )
+            time.sleep(poll_interval)
+
     def getchannels(self, channels, mdepth):
+        if self._download_mode in ("fast", "single", "optimized"):
+            return self.getchannelsFast(channels, mdepth)
+
         self.run()
         time.sleep(0.5)
         self.stop()
@@ -271,6 +383,63 @@ class oscrigol(object):
         V2MAX = float(self._osci.query(":MEASure:VMAX? CHANnel2"))
         self.run()
         return MV, V2MAX
+
+    def getchannelsFast(self, channels, mdepth, poll_interval=0.005,
+                        trigger_timeout=5.0, waveform_delay=0.01,
+                        cache_vertical_settings=True, arm_delay=0.05,
+                        require_trigger_state_change=True, max_retries=1,
+                        min_vpp=None):
+        last_error = None
+        for attempt in range(max_retries + 1):
+            self._osci.write(":SINGle")
+            self.waitForSingleTrigger(
+                timeout_s=trigger_timeout,
+                poll_interval=poll_interval,
+                arm_delay=arm_delay,
+                require_state_change=require_trigger_state_change,
+            )
+
+            if cache_vertical_settings:
+                vertical_settings = {
+                    channel: (self.getVertScale(channel), self.getVertOffset(channel))
+                    for channel in channels
+                }
+            else:
+                vertical_settings = {}
+
+            try:
+                for i, channel in enumerate(channels):
+                    vscale, offset = vertical_settings.get(channel, (None, None))
+                    values = self.getVertValuesFast(
+                        channel,
+                        mdepth,
+                        delay_time=waveform_delay,
+                        vscale=vscale,
+                        offset=offset,
+                        waveform_timeout=trigger_timeout,
+                        waveform_poll_interval=poll_interval,
+                    )
+                    if i == 0:
+                        MV = values
+                    else:
+                        MV = np.vstack((MV, values))
+
+                if min_vpp is not None:
+                    measured_vpp = np.ptp(MV, axis=-1)
+                    if np.max(measured_vpp) < min_vpp:
+                        raise RuntimeError(
+                            f"Captured waveform Vpp {np.max(measured_vpp):.4g} V "
+                            f"is below min_vpp {min_vpp:.4g} V."
+                        )
+
+                V2MAX = float(self._osci.query(":MEASure:VMAX? CHANnel2"))
+                return MV, V2MAX
+            except RuntimeError as exc:
+                last_error = exc
+                if attempt >= max_retries:
+                    raise
+
+        raise RuntimeError(f"Rigol fast acquisition failed: {last_error}")
 
     def getVMax(self, channel):
         vmax=float(self._osci.query(f":MEASure:VMAX? CHANnel{channel}"))
