@@ -72,7 +72,7 @@ Es mas simple, pero tiene esperas fijas y por eso es mas lento.
 
 Parametros importantes:
 
-- `waveform_points_grace=0.5`: margen para evitar lecturas parciales despues de
+- `waveform_points_timeout=0.5`: margen para evitar lecturas parciales despues de
   que el Rigol informa `IDLE`.
 - `max_retries=2`: reintentos ante descargas vacias, parciales o respuestas
   desincronizadas.
@@ -143,7 +143,7 @@ dependen del estado de red, backend VISA y retries.
 | `socket` | `nivisa` | `getchannelsFast` | 32 | ~0.99 | ~1.07 | Mas rapido; requiere validar retries |
 
 La mejor configuracion medida hasta ahora es `socket + nivisa +
-getchannelsFast`, usando `waveform_points_grace=0.5` y `max_retries=2`.
+getchannelsFast`, usando `waveform_points_timeout=0.5` y `max_retries=2`.
 Aunque `pyvisa` fue algo mas lento, resulto muy estable en las corridas de
 comparacion.
 

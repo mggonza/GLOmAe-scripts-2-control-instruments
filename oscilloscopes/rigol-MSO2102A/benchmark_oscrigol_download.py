@@ -195,7 +195,7 @@ def benchmark_method(scope, method_name, args):
                     arm_delay=args.arm_delay,
                     max_retries=args.max_retries,
                     min_vpp=args.min_vpp,
-                    waveform_points_grace=args.waveform_points_grace,
+                    waveform_points_timeout=args.waveform_points_timeout,
                 )
             else:
                 values, vmax = method(args.channels, args.mdepth)
@@ -333,7 +333,7 @@ def main():
     parser.add_argument("--poll-interval", type=float, default=0.005)
     parser.add_argument("--trigger-timeout", type=float, default=5.0)
     parser.add_argument("--waveform-delay", type=float, default=0.01)
-    parser.add_argument("--waveform-points-grace", type=float, default=0.5,
+    parser.add_argument("--waveform-points-timeout", type=float, default=0.5,
                         help="Seconds to keep polling after :WAV:STAT? is IDLE "
                              "but reports fewer points than requested.")
     parser.add_argument("--arm-delay", type=float, default=0.05,

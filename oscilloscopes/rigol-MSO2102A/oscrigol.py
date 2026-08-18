@@ -402,7 +402,7 @@ class oscrigol(object):
                           vscale=None, offset=None,
                           waveform_timeout=5.0,
                           waveform_poll_interval=0.005,
-                          waveform_points_grace=0.5):
+                          waveform_points_timeout=0.5):
         self._osci.write(f":WAV:SOUR CHAN{channel}")
         self._osci.write(":WAV:FORM BYTE")
         self._osci.write(":WAV:MODE RAW")
@@ -418,7 +418,7 @@ class oscrigol(object):
             timeout_s=waveform_timeout,
             poll_interval=waveform_poll_interval,
             expected_points=mem_depth,
-            points_grace_s=waveform_points_grace,
+            points_timeout_s=waveform_points_timeout,
         )
         try:
             available_points = int(waveform_status.split(",", 1)[1])
@@ -463,7 +463,7 @@ class oscrigol(object):
         return values
 
     def waitForWaveformRead(self, timeout_s=5.0, poll_interval=0.005,
-                            expected_points=None, points_grace_s=0.5):
+                            expected_points=None, points_timeout_s=0.5):
         start = time.perf_counter()
         idle_start = None
         last_status = ""
@@ -481,7 +481,7 @@ class oscrigol(object):
                     return last_status
                 if idle_start is None:
                     idle_start = time.perf_counter()
-                if (time.perf_counter() - idle_start) >= points_grace_s:
+                if (time.perf_counter() - idle_start) >= points_timeout_s:
                     return last_status
             else:
                 idle_start = None
@@ -537,7 +537,7 @@ class oscrigol(object):
                         trigger_timeout=5.0, waveform_delay=0.01,
                         cache_vertical_settings=True, arm_delay=0.05,
                         require_trigger_state_change=True, max_retries=2,
-                        min_vpp=None, waveform_points_grace=0.5):
+                        min_vpp=None, waveform_points_timeout=0.5):
         last_error = None
         for attempt in range(max_retries + 1):
             self._last_acquisition_attempts = attempt + 1
@@ -568,7 +568,7 @@ class oscrigol(object):
                         offset=offset,
                         waveform_timeout=trigger_timeout,
                         waveform_poll_interval=poll_interval,
-                        waveform_points_grace=waveform_points_grace,
+                        waveform_points_timeout=waveform_points_timeout,
                     )
                     if i == 0:
                         MV = values
