@@ -125,7 +125,7 @@ class MotorController:
         <Idle|MPos:...|FS:...>
         """
         self.ser.reset_input_buffer()
-        self.ser.write(b"?")
+        self.ser.write(b"?\r\n")
         self.ser.flush()
 
         t0 = time.time()
@@ -668,16 +668,17 @@ class MotorController:
             drift_yx=drift_yx,
             centered=centered,
         )
-        saved_points = list(reversed(points)) if reverse else points
+        if reverse:
+            points = list(reversed(points))
 
         # Validación preventiva: evita iniciar una grilla que excede límites.
-        for x, y in saved_points:
+        for x, y in points:
             self._check_limits(x, y, self.position["z"])
 
         self._save_grid(
             rows=rows,
             cols=cols,
-            points=saved_points,
+            points=points,
             points_by_id=points_by_id,
             pattern=pattern,
             source="grid",
@@ -697,6 +698,35 @@ class MotorController:
                         wait_mode=wait_mode, delay_s=delay_s, on_fail=on_fail)
 
         try:
+            points = self._generate_grid_points(
+                rows=rows,
+                cols=cols,
+                step_x=step_x,
+                step_y=step_y,
+                drift_xy=drift_xy,
+                drift_yx=drift_yx,
+                pattern=pattern,
+                centered=centered,
+            )
+
+            self._log_event(
+                "scan_grid_start",
+                rows=rows,
+                cols=cols,
+                step_x=step_x,
+                step_y=step_y,
+                step_z=step_z,
+                drift_xy=drift_xy,
+                drift_yx=drift_yx,
+                feed=feed,
+                pattern=pattern,
+                centered=centered,
+                reverse=reverse,
+                wait_mode=wait_mode,
+                delay_s=delay_s,
+                on_fail=on_fail,
+            )
+
             return self.scan_points(
                 points=points,
                 feed=feed,
@@ -709,6 +739,8 @@ class MotorController:
             )
 
         finally:
+            if return_home:
+                self.go_home(feed=feed)
             self._log_event("scan_grid_end")
 
     def scan_grid_calibrated(
