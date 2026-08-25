@@ -3,7 +3,11 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-from oscrigol import oscrigol
+
+try:
+    from .oscrigol import oscrigol
+except ImportError:
+    from oscrigol import oscrigol
 
 
 ###############################################################################
@@ -231,16 +235,16 @@ class oscrigol_oil(oscrigol):
             socket_port=socket_port,
             visa_backend=visa_backend,
         )
-        self._fast_options = {
-            "poll_interval": poll_interval,
-            "trigger_timeout": trigger_timeout,
-            "waveform_delay": waveform_delay,
-            "waveform_points_timeout": waveform_points_timeout,
-            "arm_delay": arm_delay,
-            "max_retries": max_retries,
-            "min_vpp": min_vpp,
-        }
-        self.config(download_mode=download_mode)
+        self.config(
+            download_mode=download_mode,
+            poll_interval=poll_interval,
+            trigger_timeout=trigger_timeout,
+            waveform_delay=waveform_delay,
+            waveform_points_timeout=waveform_points_timeout,
+            arm_delay=arm_delay,
+            max_retries=max_retries,
+            min_vpp=min_vpp,
+        )
 
     def config(
         self,
@@ -256,6 +260,15 @@ class oscrigol_oil(oscrigol):
         trigLevel=0.5,
         trigSlope="POS",
         download_mode=None,
+        poll_interval=None,
+        trigger_timeout=None,
+        waveform_delay=None,
+        cache_vertical_settings=None,
+        arm_delay=None,
+        require_trigger_state_change=None,
+        max_retries=None,
+        min_vpp=None,
+        waveform_points_timeout=None,
     ):
         super().config(
             channels=channels,
@@ -270,6 +283,15 @@ class oscrigol_oil(oscrigol):
             acquisition=acquisition,
             mdepth=mdepth,
             download_mode=download_mode,
+            poll_interval=poll_interval,
+            trigger_timeout=trigger_timeout,
+            waveform_delay=waveform_delay,
+            cache_vertical_settings=cache_vertical_settings,
+            arm_delay=arm_delay,
+            require_trigger_state_change=require_trigger_state_change,
+            max_retries=max_retries,
+            min_vpp=min_vpp,
+            waveform_points_timeout=waveform_points_timeout,
         )
         return
 
@@ -278,11 +300,6 @@ class oscrigol_oil(oscrigol):
 
     def getVertvalues(self, channel, mem_depth):
         return self.getVertValues(channel, mem_depth)
-
-    def getchannels(self, channels, mdepth):
-        if self._download_mode in ("fast", "single", "optimized"):
-            return self.getchannelsFast(channels, mdepth, **self._fast_options)
-        return super().getchannels(channels, mdepth)
 
     def getTempHum(self, arduino):
         return medtemphum(arduino)

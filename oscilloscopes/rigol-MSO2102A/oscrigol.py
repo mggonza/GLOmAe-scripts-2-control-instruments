@@ -58,6 +58,17 @@ class oscrigol(object):
         self._acquisition = 1
         self._mdepth = 14000
         self._download_mode = "legacy"
+        self._fast_options = {
+            "poll_interval": 0.005,
+            "trigger_timeout": 5.0,
+            "waveform_delay": 0.01,
+            "cache_vertical_settings": True,
+            "arm_delay": 0.05,
+            "require_trigger_state_change": True,
+            "max_retries": 2,
+            "min_vpp": None,
+            "waveform_points_timeout": 0.5,
+        }
         self._last_acquisition_attempts = 1
 
     def _build_resource(self):
@@ -223,7 +234,11 @@ class oscrigol(object):
     def config(self, channels=(1,), chanBand=('OFF',), chanCoup=('AC',),
                chanInv=('OFF',), chanImp = ('OMEG',),
                trigSource='CHAN1', trigCoup='AC', trigLevel=0.0, trigSlope = 'POS',
-               acquisition=1,mdepth=14000, download_mode=None):
+               acquisition=1,mdepth=14000, download_mode=None,
+               poll_interval=None, trigger_timeout=None, waveform_delay=None,
+               cache_vertical_settings=None, arm_delay=None,
+               require_trigger_state_change=None, max_retries=None,
+               min_vpp=None, waveform_points_timeout=None):
 
         self._channels = channels
         self._chanBand = chanBand
@@ -238,6 +253,20 @@ class oscrigol(object):
         self._mdepth = mdepth
         if download_mode is not None:
             self._download_mode = download_mode.lower()
+        fast_options = {
+            "poll_interval": poll_interval,
+            "trigger_timeout": trigger_timeout,
+            "waveform_delay": waveform_delay,
+            "cache_vertical_settings": cache_vertical_settings,
+            "arm_delay": arm_delay,
+            "require_trigger_state_change": require_trigger_state_change,
+            "max_retries": max_retries,
+            "min_vpp": min_vpp,
+            "waveform_points_timeout": waveform_points_timeout,
+        }
+        for key, value in fast_options.items():
+            if value is not None:
+                self._fast_options[key] = value
         return
 
     ############################
@@ -516,7 +545,7 @@ class oscrigol(object):
 
     def getchannels(self, channels, mdepth):
         if self._download_mode in ("fast", "single", "optimized"):
-            return self.getchannelsFast(channels, mdepth)
+            return self.getchannelsFast(channels, mdepth, **self._fast_options)
 
         self._last_acquisition_attempts = 1
         self.run()
