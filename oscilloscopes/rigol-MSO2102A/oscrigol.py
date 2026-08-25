@@ -729,6 +729,15 @@ class oscrigol(object):
         # Init communication
         self.initComm()
 
+        # Re-apply the configured trigger before RUN/STOP cycles.
+        # This avoids inheriting the transient state left by :SINGle captures.
+        self.setEdgeTrigger(
+            self._trigSource,
+            self._trigSlope,
+            self._trigCoup,
+            self._trigLevel,
+        )
+
         # Configuración del modo de adquisición
         # PEAK permite capturar excursiones máximas y mínimas
         if mode.upper() in ("PEAK", "PDET", "PEAKDETECT"):
