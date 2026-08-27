@@ -403,35 +403,38 @@ class oscrigol(object):
                 f"Rigol waveform binary read failed and the VISA buffer was cleared: {exc}"
             ) from exc
 
-    def getVertValues(self, channel, mem_depth, delay_time=0.5):
-        self._osci.write(f":WAV:SOUR CHAN{channel}")
-        self._osci.write(":WAV:FORM BYTE")
-        self._osci.write(":WAV:MODE RAW")
-        self._osci.write(f":WAV:POIN {int(mem_depth)}")
-        self._osci.write(f":WAV:STAR 1") # preamble in bits 0-10
-        self._osci.write(f":WAV:STOP {int(mem_depth)}")
-        self._osci.write(":WAV:RES")
-        self._osci.write(":WAV:BEG")
-        time.sleep(delay_time)
-
-        raw = self._queryWaveformData(expected_points=mem_depth)
-        time.sleep(0.2)
+    def _rawWaveformToVolts(self, raw, channel, vscale=None, offset=None):
+        # Convert Rigol BYTE waveform data to volts using the same calibration
+        # convention used by the legacy download path.
         values = np.array(raw)
-        vscale = self.getVertScale(channel)
-        offset = self.getVertOffset(channel)
+        if vscale is None:
+            vscale = self.getVertScale(channel)
+        if offset is None:
+            offset = self.getVertOffset(channel)
         ref = 127.0
         div = 25.4
-        # IMPORTANT: The vertical axis has 10 divisions,
-        #            but only 8 are visible on the screen.
+        return (values*1.0 - ref)/div * vscale - offset
 
-        values = (values*1.0 - ref)/div * vscale - offset
-        return values
+    def _checkRawWaveformSaturation(self, raw, lower_limit=1, upper_limit=254,
+                                    min_count=2):
+        raw = np.asarray(raw)
+        if raw.size == 0:
+            return False, False, 0, 0
 
-    def getVertValuesFast(self, channel, mem_depth, delay_time=0.0,
-                          vscale=None, offset=None,
-                          waveform_timeout=5.0,
-                          waveform_poll_interval=0.005,
-                          waveform_points_timeout=0.5):
+        # Values below/above the safe ADC range indicate clipping. Requiring
+        # more than one point avoids reacting to a single isolated spike.
+        lower_count = int(np.count_nonzero(raw < lower_limit))
+        upper_count = int(np.count_nonzero(raw > upper_limit))
+        lower_saturated = lower_count >= min_count
+        upper_saturated = upper_count >= min_count
+        return lower_saturated, upper_saturated, lower_count, upper_count
+
+    def _readRawWaveformFast(self, channel, mem_depth, delay_time=0.0,
+                             waveform_timeout=5.0,
+                             waveform_poll_interval=0.005,
+                             waveform_points_timeout=0.5):
+        # Configure a RAW waveform read from internal memory. This helper only
+        # downloads bytes; voltage conversion is kept separate for reuse.
         self._osci.write(f":WAV:SOUR CHAN{channel}")
         self._osci.write(":WAV:FORM BYTE")
         self._osci.write(":WAV:MODE RAW")
@@ -443,6 +446,8 @@ class oscrigol(object):
         if delay_time > 0:
             time.sleep(delay_time)
 
+        # Wait until the Rigol waveform-reading thread has filled the buffer
+        # with the requested number of internal-memory points.
         waveform_status = self.waitForWaveformRead(
             timeout_s=waveform_timeout,
             poll_interval=waveform_poll_interval,
@@ -461,6 +466,7 @@ class oscrigol(object):
 
         read_ok = False
         try:
+            # The binary query blocks until PyVISA has received the block.
             raw = self._queryWaveformData(expected_points=mem_depth)
             read_ok = True
         finally:
@@ -471,25 +477,50 @@ class oscrigol(object):
             except pyvisa.errors.VisaIOError as exc:
                 print(f"Warning: could not send :WAV:END cleanly: {exc}")
                 self._clearCommBuffer()
-        values = np.array(raw)
-        if values.size == 0:
+
+        raw = np.array(raw)
+        if raw.size == 0:
             raise RuntimeError(
                 "Rigol returned 0 waveform points after :WAV:STAT? reported IDLE."
             )
-        if values.size != int(mem_depth):
+        if raw.size != int(mem_depth):
             raise RuntimeError(
-                f"Rigol returned {values.size} waveform points, "
+                f"Rigol returned {raw.size} waveform points, "
                 f"expected {int(mem_depth)}."
             )
-        if vscale is None:
-            vscale = self.getVertScale(channel)
-        if offset is None:
-            offset = self.getVertOffset(channel)
-        ref = 127.0
-        div = 25.4
+        return raw
 
-        values = (values*1.0 - ref)/div * vscale - offset
-        return values
+    def getVertValues(self, channel, mem_depth, delay_time=0.5):
+        self._osci.write(f":WAV:SOUR CHAN{channel}")
+        self._osci.write(":WAV:FORM BYTE")
+        self._osci.write(":WAV:MODE RAW")
+        self._osci.write(f":WAV:POIN {int(mem_depth)}")
+        self._osci.write(f":WAV:STAR 1") # preamble in bits 0-10
+        self._osci.write(f":WAV:STOP {int(mem_depth)}")
+        self._osci.write(":WAV:RES")
+        self._osci.write(":WAV:BEG")
+        time.sleep(delay_time)
+
+        raw = self._queryWaveformData(expected_points=mem_depth)
+        time.sleep(0.2)
+        # IMPORTANT: The vertical axis has 10 divisions,
+        #            but only 8 are visible on the screen.
+        return self._rawWaveformToVolts(raw, channel)
+
+    def getVertValuesFast(self, channel, mem_depth, delay_time=0.0,
+                          vscale=None, offset=None,
+                          waveform_timeout=5.0,
+                          waveform_poll_interval=0.005,
+                          waveform_points_timeout=0.5):
+        raw = self._readRawWaveformFast(
+            channel,
+            mem_depth,
+            delay_time=delay_time,
+            waveform_timeout=waveform_timeout,
+            waveform_poll_interval=waveform_poll_interval,
+            waveform_points_timeout=waveform_points_timeout,
+        )
+        return self._rawWaveformToVolts(raw, channel, vscale=vscale, offset=offset)
 
     def waitForWaveformRead(self, timeout_s=5.0, poll_interval=0.005,
                             expected_points=None, points_timeout_s=0.5):
@@ -664,14 +695,91 @@ class oscrigol(object):
     def _is_invalid_measurement(self, value, invalid_threshold=1e30):
         return (not np.isfinite(value)) or (abs(value) > invalid_threshold)
 
-    def _safe_get_vmin_vmax(self, channel):
+    def _safe_get_vmin_vmax(self, channel, invalid_threshold=1e30):
         vmin = self.getVMin(channel)
         vmax = self.getVMax(channel)
 
-        invalid_min = self._is_invalid_measurement(vmin)
-        invalid_max = self._is_invalid_measurement(vmax)
+        invalid_min = self._is_invalid_measurement(vmin, invalid_threshold)
+        invalid_max = self._is_invalid_measurement(vmax, invalid_threshold)
 
         return vmin, vmax, invalid_min, invalid_max
+
+    def _getRawMinMaxFast(self, channel, mem_depth, vscale=None, offset=None,
+                          settle_wait=0.0, invalid_threshold=1e30,
+                          saturation_min_count=2):
+        last_error = None
+        max_retries = self._fast_options["max_retries"]
+        for attempt in range(max_retries + 1):
+            try:
+                # Arm a single acquisition so min/max are calculated from a
+                # fresh triggered waveform, not from a previous screen state.
+                self._osci.write(":SINGle")
+                self.waitForSingleTrigger(
+                    timeout_s=self._fast_options["trigger_timeout"],
+                    poll_interval=self._fast_options["poll_interval"],
+                    arm_delay=self._fast_options["arm_delay"],
+                    require_state_change=self._fast_options[
+                        "require_trigger_state_change"
+                    ],
+                )
+                if settle_wait > 0:
+                    time.sleep(settle_wait)
+
+                raw = self._readRawWaveformFast(
+                    channel,
+                    mem_depth,
+                    delay_time=self._fast_options["waveform_delay"],
+                    waveform_timeout=self._fast_options["trigger_timeout"],
+                    waveform_poll_interval=self._fast_options["poll_interval"],
+                    waveform_points_timeout=self._fast_options[
+                        "waveform_points_timeout"
+                    ],
+                )
+                # Compute min/max locally on the same RAW data path used for
+                # the final optimized measurement.
+                values = self._rawWaveformToVolts(
+                    raw,
+                    channel,
+                    vscale=vscale,
+                    offset=offset,
+                )
+                vmin = float(np.min(values))
+                vmax = float(np.max(values))
+                (
+                    lower_saturated,
+                    upper_saturated,
+                    lower_count,
+                    upper_count,
+                ) = self._checkRawWaveformSaturation(
+                    raw,
+                    min_count=saturation_min_count,
+                )
+                invalid_min = (
+                    self._is_invalid_measurement(vmin, invalid_threshold)
+                    or lower_saturated
+                )
+                invalid_max = (
+                    self._is_invalid_measurement(vmax, invalid_threshold)
+                    or upper_saturated
+                )
+                return (
+                    vmin,
+                    vmax,
+                    invalid_min,
+                    invalid_max,
+                    lower_saturated,
+                    upper_saturated,
+                    lower_count,
+                    upper_count,
+                )
+            except (RuntimeError, TimeoutError, pyvisa.errors.VisaIOError,
+                    UnicodeDecodeError, ValueError) as exc:
+                last_error = exc
+                self._clearCommBuffer()
+                if attempt >= max_retries:
+                    raise
+
+        raise RuntimeError(f"Rigol raw min/max acquisition failed: {last_error}")
 
     def autoAdjustVertScale(
         self,
@@ -690,16 +798,18 @@ class oscrigol(object):
         recovery_offset_divisions=2.0,
         acq_wait=0.5,
         settle_wait=0.2,
+        minmax_source="measure",
+        saturation_min_count=2,
         verbose=True
     ):
         """
         Autoajuste condicional de escala vertical y offset.
 
         La función:
-        - mide VMAX y VMIN usando mediciones internas del Rigol;
+        - obtiene VMAX/VMIN con mediciones internas o con RAW single;
         - calcula cuántas divisiones verticales ocupa la señal;
         - reajusta la escala solo si es necesario;
-        - detecta saturación/fuera de rango (~9.9e37);
+        - detecta saturación RAW si se usa minmax_source='raw';
         - aplica recuperación automática de escala y offset.
 
         Parámetros
@@ -717,20 +827,25 @@ class oscrigol(object):
             - invalid_threshold: umbral para detectar mediciones inválidas.
             - recovery_scale_factor: factor aplicado a escala durante recuperación.
             - recovery_offset_divisions: divisiones usadas para mover offset.
-            - acq_wait: tiempo de espera para adquirir señal.
-            - settle_wait: tiempo de estabilización luego de detener adquisición.
+            - acq_wait: tiempo de espera para adquirir señal en modo 'measure'.
+            - settle_wait: tiempo de estabilización antes de calcular min/max.
+            - minmax_source: 'measure' usa :MEASure; 'raw' usa single+RAW.
+            - saturation_min_count: cantidad minima de bytes RAW saturados.
             - verbose: si True imprime información detallada.
         """
 
         # Si no se especifican canales usar los definidos en config()
         if channels is None:
             channels = self._channels
+        minmax_source = minmax_source.lower()
+        if minmax_source not in ("measure", "raw", "raw_fast"):
+            raise ValueError("Usar minmax_source='measure' o minmax_source='raw'.")
 
         # Init communication
         self.initComm()
 
-        # Re-apply the configured trigger before RUN/STOP cycles.
-        # This avoids inheriting the transient state left by :SINGle captures.
+        # Re-apply the configured trigger before auto-adjust acquisitions.
+        # This avoids inheriting trigger state from previous captures.
         self.setEdgeTrigger(
             self._trigSource,
             self._trigSlope,
@@ -752,11 +867,6 @@ class oscrigol(object):
 
         adjusted = {}
 
-        # Función auxiliar:
-        # el Rigol devuelve típicamente ~9.9e37 cuando una medición es inválida
-        def is_invalid(value):
-            return (not np.isfinite(value)) or (abs(value) > invalid_threshold)
-
         # Procesar cada canal
         for ch in channels:
 
@@ -764,30 +874,46 @@ class oscrigol(object):
 
             # Iteraciones de ajuste si la señal está inicialmente fuera de rango
             for it in range(n_iter):
-                # Ejecutar adquisición
-                self.run()
-
-                # Esperar captura
-                # importante en sistemas sincronizados con láser pulsado
-                time.sleep(acq_wait)
-
-                # Congelar adquisición
-                self.stop()
-
-                # Esperar estabilización interna del osciloscopio
-                time.sleep(settle_wait)
-
-                # Mediciones internas del Rigol
-                vmax = self.getVMax(ch)
-                vmin = self.getVMin(ch)
-
-                # Detectar mediciones inválidas/fuera de rango
-                invalid_max = is_invalid(vmax)
-                invalid_min = is_invalid(vmin)
-
                 # Configuración actual del canal
                 current_scale = self.getVertScale(ch)
                 current_offset = self.getVertOffset(ch)
+
+                if minmax_source == "measure":
+                    # Historical path: use the Rigol measurement engine after
+                    # a RUN/STOP capture.
+                    self.run()
+                    time.sleep(acq_wait)
+                    self.stop()
+                    time.sleep(settle_wait)
+                    vmin, vmax, invalid_min, invalid_max = self._safe_get_vmin_vmax(
+                        ch,
+                        invalid_threshold=invalid_threshold,
+                    )
+                    lower_saturated = False
+                    upper_saturated = False
+                    lower_count = 0
+                    upper_count = 0
+                else:
+                    # Optimized path: use single-trigger RAW data and compute
+                    # min/max locally from the downloaded memory points.
+                    (
+                        vmin,
+                        vmax,
+                        invalid_min,
+                        invalid_max,
+                        lower_saturated,
+                        upper_saturated,
+                        lower_count,
+                        upper_count,
+                    ) = self._getRawMinMaxFast(
+                        ch,
+                        self._mdepth,
+                        vscale=current_scale,
+                        offset=current_offset,
+                        settle_wait=settle_wait,
+                        invalid_threshold=invalid_threshold,
+                        saturation_min_count=saturation_min_count,
+                    )
 
                 if verbose:
                     print(f"\nAutoAdjust vertical - iteración {it+1}/{n_iter}")
@@ -833,10 +959,20 @@ class oscrigol(object):
                     adjusted[ch] = True
 
                     if verbose:
-                        print(
-                            f"CH{ch}: medición fuera de rango "
-                            f"(Vmin={vmin:.4g}, Vmax={vmax:.4g})"
-                        )
+                        if minmax_source == "measure":
+                            print(
+                                f"CH{ch}: medición fuera de rango "
+                                f"(Vmin={vmin:.4g}, Vmax={vmax:.4g})"
+                            )
+                        else:
+                            print(
+                                f"CH{ch}: RAW saturada/fuera de rango "
+                                f"(Vmin={vmin:.4g}, Vmax={vmax:.4g}, "
+                                f"sat_low={lower_saturated}, "
+                                f"sat_high={upper_saturated}, "
+                                f"n_low={lower_count}, "
+                                f"n_high={upper_count})"
+                            )
 
                         print(
                             f"CH{ch}: recuperación -> "

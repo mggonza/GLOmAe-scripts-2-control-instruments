@@ -81,6 +81,38 @@ Parametros importantes:
 La clase guarda el numero de intentos usados en `_last_acquisition_attempts`.
 El benchmark lo usa para reportar `attempts` y `retries`.
 
+## Autoajuste vertical
+
+`autoAdjustVertScale(...)` ajusta escala y offset vertical manteniendo la misma
+logica de reescalado historica. Por defecto usa el motor interno de medicion
+del Rigol (`minmax_source="measure"`), igual que la implementacion anterior.
+
+Para comparar contra la descarga real, se puede activar:
+
+```python
+MSO2102A.autoAdjustVertScale(
+    channels=(1,),
+    minmax_source="raw",
+    saturation_min_count=2,
+)
+```
+
+Con `minmax_source="raw"` obtiene `Vmin` y `Vmax` desde una captura RAW
+sincronizada:
+
+1. re-aplica el trigger configurado con `setEdgeTrigger(...)`;
+2. configura el modo de adquisicion `PEAK` o `NORM`;
+3. arma una captura con `:SINGle`;
+4. espera el disparo con `waitForSingleTrigger(...)`;
+5. descarga la senal RAW del canal;
+6. calcula minimo y maximo con NumPy;
+7. marca saturacion si al menos `saturation_min_count` bytes crudos quedan
+   fuera del rango seguro del ADC (`<1` o `>254`).
+
+Esto evita depender de `:MEASure:VMAX?` y `:MEASure:VMIN?`, que el manual
+asocia al motor interno de medicion y a la region de pantalla/cursor, no a una
+garantia explicita de memoria RAW completa.
+
 ## Validaciones de robustez
 
 La clase protege varios casos observados durante las pruebas:
