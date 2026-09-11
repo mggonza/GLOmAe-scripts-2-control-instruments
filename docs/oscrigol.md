@@ -1,14 +1,16 @@
 # Rigol MSO2102A: clase `oscrigol`
 
 Guia breve para entender y probar la clase
-[`oscrigol.py`](../oscilloscopes/rigol-MSO2102A/oscrigol.py).
+[`oscrigol.py`](../oscilloscopes/rigol-MSO2102A/oscrigol.py) y sus wrappers de
+laboratorio.
 
 ## Proposito
 
 `oscrigol` controla un osciloscopio Rigol MSO2102A por TCP/IP usando PyVISA.
 Mantiene una interfaz similar a las clases Tektronix del repositorio. La clase
 incluye un modo legacy y un modo optimizado para reducir el tiempo de descarga
-sin aceptar lecturas vacias o parciales.
+sin aceptar lecturas vacias o parciales. El modo optimizado ya es usado por los
+wrappers `oscrigol_oil.py` y `oscrigol_pacter.py`.
 
 ## Conexion VISA
 
@@ -25,6 +27,10 @@ Tambien acepta dos backends VISA con nombres legibles:
 El modo socket requiere terminadores `\n` para lectura y escritura; `initComm()`
 los configura automaticamente.
 
+El default de la clase y de los wrappers de laboratorio es `visa_backend="pyvisa"`
+para facilitar reproducibilidad. Para comparar contra NI-VISA, usar
+`visa_backend="nivisa"`.
+
 ## Configuracion principal
 
 La configuracion se carga con `config(...)`:
@@ -34,6 +40,36 @@ La configuracion se carga con `config(...)`:
 - trigger de flanco: fuente, acoplamiento, nivel y pendiente;
 - modo de descarga: `download_mode="legacy"` o `download_mode="fast"`;
 - profundidad de memoria `mdepth`.
+- opciones del modo rapido: `poll_interval`, `trigger_timeout`,
+  `waveform_delay`, `waveform_points_timeout`, `arm_delay`, `max_retries` y
+  `min_vpp`.
+
+Ejemplo minimo para CH1 con socket y descarga rapida:
+
+```python
+MSO2102A = oscrigol(
+    "192.168.2.2",
+    use_socket=True,
+    visa_backend="pyvisa",
+)
+
+MSO2102A.config(
+    channels=(1,),
+    chanBand=("20M",),
+    chanCoup=("AC",),
+    chanInv=("OFF",),
+    chanImp=("OMEG",),
+    trigSource="CHAN1",
+    trigCoup="AC",
+    trigLevel=0.1,
+    trigSlope="POS",
+    acquisition=1,
+    mdepth=70000,
+    download_mode="fast",
+    waveform_points_timeout=0.5,
+    max_retries=2,
+)
+```
 
 Luego se suele llamar:
 
@@ -77,6 +113,8 @@ Parametros importantes:
 - `max_retries=2`: reintentos ante descargas vacias, parciales o respuestas
   desincronizadas.
 - `min_vpp`: umbral opcional para rechazar capturas con amplitud demasiado baja.
+- `arm_delay=0.05`: espera corta despues de `:SINGle` antes de consultar el
+  estado de trigger.
 
 La clase guarda el numero de intentos usados en `_last_acquisition_attempts`.
 El benchmark lo usa para reportar `attempts` y `retries`.
@@ -112,6 +150,12 @@ sincronizada:
 Esto evita depender de `:MEASure:VMAX?` y `:MEASure:VMIN?`, que el manual
 asocia al motor interno de medicion y a la region de pantalla/cursor, no a una
 garantia explicita de memoria RAW completa.
+
+Si se quiere conservar el comportamiento historico:
+
+```python
+MSO2102A.autoAdjustVertScale(channels=(1,), minmax_source="measure")
+```
 
 ## Validaciones de robustez
 
@@ -160,6 +204,76 @@ reintentos y errores. Una descarga debe considerarse valida solo si:
 - `signal_ok` es verdadero;
 - `error` esta vacio.
 
+El script usa nombres claros para el backend:
+
+- `--visa-backend pyvisa`
+- `--visa-backend nivisa`
+
+El modo fake no requiere hardware y sirve para validar el testbench:
+
+```bash
+python oscilloscopes/rigol-MSO2102A/benchmark_oscrigol_download.py \
+  --backend fake \
+  --iterations 5 \
+  --methods legacy,fast
+```
+
+## Notebooks vigentes
+
+- [`benchmark_oscrigol_download.ipynb`](../oscilloscopes/rigol-MSO2102A/benchmark_oscrigol_download.ipynb):
+  version interactiva del benchmark, con graficos de formas de onda, tiempos,
+  retries y calidad de senal.
+- [`manual_test_oscrigol.ipynb`](../oscilloscopes/rigol-MSO2102A/manual_test_oscrigol.ipynb):
+  prueba manual de conexion, autoajuste y una captura con la clase base.
+- [`med_oscrigol_oil.ipynb`](../oscilloscopes/rigol-MSO2102A/med_oscrigol_oil.ipynb):
+  template generico para mediciones OIL usando `oil_med(...)`.
+
+## Wrappers de laboratorio
+
+`oscrigol_oil.py` y `oscrigol_pacter.py` heredan de `oscrigol`. Mantienen los
+defaults y funciones historicas de cada experimento, pero delegan comunicacion,
+descarga, retries y validaciones en la clase base testeada.
+
+Ejemplo OIL:
+
+```python
+from oscrigol_oil import oil_med, plotresults
+
+t, MV, E, T = oil_med(
+    Nmed=10,
+    acq=1,
+    mdepth=70000,
+    visa_backend="pyvisa",
+    download_mode="fast",
+    waveform_points_timeout=0.5,
+    max_retries=2,
+)
+```
+
+Ejemplo PACTER:
+
+```python
+from oscrigol_pacter import pacter_med, plotresults
+
+t, MV, E, T = pacter_med(
+    Nmed=10,
+    acq=1,
+    mdepth=70000,
+    visa_backend="pyvisa",
+    download_mode="fast",
+)
+```
+
+Si estos archivos estan dentro de una carpeta `utils/`, se pueden importar como:
+
+```python
+from utils.oscrigol_oil import oil_med
+from utils.oscrigol_pacter import pacter_med
+```
+
+Los wrappers tienen un fallback de importacion para encontrar `oscrigol.py` en
+el mismo directorio.
+
 ## Resultados principales
 
 Resumen de las pruebas realizadas con `mdepth=70000`, CH1, trigger en CH1 a
@@ -177,7 +291,8 @@ dependen del estado de red, backend VISA y retries.
 La mejor configuracion medida hasta ahora es `socket + nivisa +
 getchannelsFast`, usando `waveform_points_timeout=0.5` y `max_retries=2`.
 Aunque `pyvisa` fue algo mas lento, resulto muy estable en las corridas de
-comparacion.
+comparacion. Para trabajo rutinario conviene priorizar que cada descarga tenga
+`samples_ok=True`, `signal_ok=True` y pocos retries.
 
 ## Senal de prueba usada
 
