@@ -1,14 +1,17 @@
-import numpy as np
 import time
 from datetime import datetime
+from pathlib import Path
+
+import numpy as np
 
 try:
     from .oscrigol import oscrigol
 except ImportError:
     from oscrigol import oscrigol
 
+
 ###############################################################################
-def pacter_med(
+def oil_med(
     Nmed=1,
     acq=16,
     mdepth=70000,
@@ -25,29 +28,52 @@ def pacter_med(
     arm_delay=0.05,
     max_retries=2,
     min_vpp=None,
+    output_dir="./Mediciones/",
+    serial_comm="/dev/ttyUSB0",
+    baud_rate=9600,
+    measurement_pause=0.1,
 ):
     """
-    Scripts to obtain PACTER measurements
-    
-    	Inputs parameters:
-    		Nmed: number of measurements (int)
-    		acq: number of acquisitions to perform average (int)
-    		mdepth: number of samples to be acquired 7000|70000|700000|7000000|28000000
-    	
-    	Output:
-    		t: time axis (Nt,) [s]
-    		MV: voltage signals (Nmed,Nt) [V]
-    		E: laser energy measurements (Nmed,) [J]
-    		T: elapsed time [s], water temperature [°C], 
-            air temperature [°C] and air relative humidity [%] (Nmed,4)  
-    
+    Script to obtain OIL measurements.
+
+    Parameters
+    ----------
+    Nmed : int
+        Number of measurements.
+    acq : int
+        Number of oscilloscope acquisitions to average per measurement.
+    mdepth : int
+        Number of samples to download per acquisition.
+    saveresults : bool
+        If True, save partial results after every measurement.
+    ip_address : str
+        Rigol MSO2102A IP address.
+    transport : str
+        "socket" for raw sockets or "instr" for VXI-11/INSTR.
+    use_socket : bool
+        Compatibility option. If set, overrides transport.
+    visa_backend : str
+        "nivisa" for NI-VISA or "pyvisa" for pyvisa-py.
+    download_mode : str
+        "fast" uses the optimized single-trigger download in oscrigol.py.
+
+    Returns
+    -------
+    t : ndarray
+        Time axis, shape (Nt,).
+    MV : ndarray
+        Optoacoustic voltage signals, shape (Nmed, Nt).
+    E : ndarray
+        Laser energy measurements, shape (Nmed,).
+    T : ndarray
+        Elapsed time, T1, air temperature, relative humidity and T2,
+        shape (Nmed, 5).
     """
-      
-    # Crear objeto osciloscopio Rigol
+
     if use_socket is None:
         use_socket = transport == "socket"
 
-    MSO2102A = oscrigol_pacter(
+    scope = oscrigol_oil(
         ip_address=ip_address,
         use_socket=use_socket,
         visa_backend=visa_backend,
@@ -60,131 +86,130 @@ def pacter_med(
         max_retries=max_retries,
         min_vpp=min_vpp,
     )
-    MSO2102A.config(acquisition=acq, mdepth=mdepth, download_mode=download_mode)
+    scope.config(acquisition=acq, mdepth=mdepth, download_mode=download_mode)
 
-    # Setup arduino
-    arduino = createArduino()
+    arduino = createArduino(serial_comm=serial_comm, baud_rate=baud_rate)
 
-    # Constante de conversión medidor energía láser:
-    cte = 1/(0.08*0.08*2)*(1-0.08*2)/1.086e4 # J/V
-    cte2 = cte*(1-0.08*2)  # J/V
-    
-    # Variables de salida
+    cte = 1 / (0.08 * 0.08 * 2) * (1 - 0.08 * 2) / 1.086e4
+    cte2 = cte
+
     Nt = int(mdepth)
-    MV = np.zeros((Nmed,Nt)) # [V]
-    E = np.zeros((Nmed,)) # [J]
-    T = np.zeros((Nmed,4))
-    
-    # Nombre del archivo donde se guarda
-    now = datetime.now()
+    MV = np.zeros((Nmed, Nt))
+    E = np.zeros((Nmed,))
+    T = np.zeros((Nmed, 5))
 
-    filename = 'medPACTER_' + now.strftime("%d-%b-%Y-%H:%M:%S")
-    
-    path = './Mediciones/'
-    
-    # Medición del tiempo transcurrido TT
+    now = datetime.now()
+    filename = "medOIL_" + now.strftime("%d-%b-%Y-%H:%M:%S")
+    output_path = Path(output_dir)
+    if saveresults:
+        output_path.mkdir(parents=True, exist_ok=True)
+
     start = time.perf_counter()
-    
+    t = np.zeros((Nt,))
+
     for i in range(Nmed):
-        
-        print(f"Medición: {i+1}")
-        
-        t, v1, v2m = MSO2102A()
-    
-        # Relevar tiempo pasado, temperatura agua, temperatura aire y humedad
-        #Tw, Ta, RH = 0.0, 0.0, 0.0 
-        Tw, Ta, RH = medtemphum(arduino)
-        #print("Tw =",Tw,"Ta =",Ta,"RH =",RH)
-        
-        TT = time.perf_counter() - start  # [s]
-        
-        MV[i,:] = v1
+        print(f"Medicion: {i + 1}")
+
+        t, v1, v2m = scope()
+        Tw, Ta, RH, T2 = medtemphum(arduino)
+
+        TT = time.perf_counter() - start
+
+        MV[i, :] = v1
         E[i] = v2m * cte2
-        T[i,0] = TT 
-        T[i,1] = Tw   
-        T[i,2] = Ta   
-        T[i,3] = RH   
+        T[i, 0] = TT
+        T[i, 1] = Tw
+        T[i, 2] = Ta
+        T[i, 3] = RH
+        T[i, 4] = T2
 
         if saveresults:
-            np.savez(path + filename + '.npz', t=t, MV = MV, E=E, T=T)
+            np.savez(output_path / f"{filename}.npz", t=t, MV=MV, E=E, T=T)
 
-        if i < (Nmed-1):
-            seguir = input("Presione ENTER para continuar...")
+        if measurement_pause > 0:
+            time.sleep(measurement_pause)
 
-    print("¡Bien hecho, bucle finalizado!")
-       
     return t, MV, E, T
+
 
 ###############################################################################
 def plotresults(t, MV, E, T):
     import matplotlib.pyplot as plt
 
     plt.figure()
+    plt.title("All measured signals")
     for i in range(MV.shape[0]):
-        plt.plot(t*1e6,MV[i,:]*1e3)
-        plt.grid(linestyle = '--')
-        plt.xlabel('elapsed time [us]'); plt.ylabel('Amplitude [mV]')
+        plt.plot(t * 1e6, MV[i, :] * 1e3)
+        plt.grid(linestyle="--")
+        plt.xlabel("time [us]")
+        plt.ylabel("Amplitude [mV]")
 
     plt.figure()
-    plt.plot(T[:,0]/60,E*1e3,'s-')
-    plt.grid(linestyle = '--')
-    plt.xlabel('elapsed time [min]'); plt.ylabel('Energy laser [mJ]')
-
-    plt.figure()
-    plt.plot(T[:,0]/60,T[:,1],'*-',label='Water temp (°C)')
-    plt.plot(T[:,0]/60,T[:,2],'o-',label='Aire temp (°C)')
-    plt.plot(T[:,0]/60,T[:,3],'s-',label='Air humidity (%)')
-    plt.grid(linestyle = '--')
-    plt.xlabel('elapsed time [min]'); plt.ylabel('Environment variables')
+    i = 0
+    plt.title("Averaged signal vs 1st measured signal")
+    plt.plot(t * 1e6, MV[i, :] * 1e3, label="signal " + str(i + 1))
+    plt.plot(t * 1e6, np.mean(MV, axis=0) * 1e3, label="averaged signal")
+    plt.grid(linestyle="--")
+    plt.xlabel("time [us]")
+    plt.ylabel("Amplitude [mV]")
     plt.legend()
-    
+
+    plt.figure()
+    plt.title("Laser energy")
+    plt.plot(T[:, 0] / 60, E * 1e3, "s-")
+    plt.grid(linestyle="--")
+    plt.xlabel("elapsed time [min]")
+    plt.ylabel("Energy laser [mJ]")
+
+    plt.figure()
+    plt.title("Environment variables")
+    plt.plot(T[:, 0] / 60, T[:, 1], "*-", label="T1 [C]")
+    plt.plot(T[:, 0] / 60, T[:, 4], "s-", label="T2 [C]")
+    plt.plot(T[:, 0] / 60, T[:, 2], "o-", label="Air temp [C]")
+    plt.grid(linestyle="--")
+    plt.xlabel("elapsed time [min]")
+    plt.ylabel("Temperature [C]")
+    plt.legend(title="Air humidity: " + str(np.round(np.mean(T[:, 3]), 1)) + " %")
+
     return
 
+
 ###############################################################################
-def createArduino():
+def createArduino(serial_comm="/dev/ttyUSB0", baud_rate=9600, startup_wait=2):
     import serial
 
-    serial_comm = "/dev/ttyUSB0"
-    baud_rate = 9600
-
-    # --- Configuración del puerto ---
     arduino = serial.Serial(serial_comm, baud_rate, timeout=2)
-    time.sleep(2)  # espera a que Arduino reinicie
+    time.sleep(startup_wait)
     return arduino
+
 
 ###############################################################################
 def medtemphum(arduino):
-    # t1, t2    -> ds18b20
-    # tdht, hum -> DHT11
+    # t1, t2 -> DS18B20; tdht, hum -> DHT11.
     arduino.reset_input_buffer()
     arduino.reset_output_buffer()
-    arduino.write(b'R')
+    arduino.write(b"R")
     arduino.flush()
     time.sleep(1)
     line = arduino.readline().decode().strip()
     if line:
         try:
             t1, t2, tdht, hum = map(float, line.split(","))
-            return t1, tdht, hum # descartamos t2
+            return t1, tdht, hum, t2
         except ValueError:
-            return None
-    return None
+            pass
+    return np.nan, np.nan, np.nan, np.nan
+
 
 ###############################################################################
-class oscrigol_pacter(oscrigol):
+class oscrigol_oil(oscrigol):
     """
-    PACTER-oriented wrapper around the tested oscrigol implementation.
+    OIL-oriented wrapper around the tested oscrigol implementation.
 
-    It keeps the original PACTER defaults and public method names, but delegates
+    It keeps the original OIL defaults and public method names, but delegates
     VISA communication, waveform download, retries and validation to oscrigol.py.
-
-    Output:
-        t: time axis (Nt,) [s]
-        v1: optoacoustic signals (Nt,) [V]
-        v2m: maximum value piroelectric signal [V]
     """
 
-    ##########################################################################
     def __init__(
         self,
         ip_address="192.168.2.2",
@@ -221,9 +246,6 @@ class oscrigol_pacter(oscrigol):
             min_vpp=min_vpp,
         )
 
-    ############################
-    # Configuration
-    ############################
     def config(
         self,
         acquisition=1,
@@ -279,9 +301,5 @@ class oscrigol_pacter(oscrigol):
     def getVertvalues(self, channel, mem_depth):
         return self.getVertValues(channel, mem_depth)
 
-    ################################    
-    # Medicion temperatura y humedad
-    ################################
     def getTempHum(self, arduino):
-        Tw, Ta, RH = medtemphum(arduino)
-        return Tw, Ta, RH
+        return medtemphum(arduino)
